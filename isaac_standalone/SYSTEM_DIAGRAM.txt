@@ -1,0 +1,430 @@
+════════════════════════════════════════════════════════════════════════════════
+                    UR5 HTTP CONTROL - SYSTEM ARCHITECTURE DIAGRAM
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                          OVERALL SYSTEM VIEW                                │
+└────────────────────────────────────────────────────────────────────────────┘
+
+      ┌─────────────────────┐              ┌─────────────────────┐
+      │  TERMINAL 1         │              │  TERMINAL 2         │
+      │  Flask Server       │              │  Isaac Sim          │
+      └─────────────────────┘              └─────────────────────┘
+               │                                      │
+               │                                      │
+               v                                      v
+      ┌─────────────────────┐              ┌─────────────────────┐
+      │ test_flask_server.py│              │ ur5_http_control.py │
+      │                     │              │                     │
+      │  Port: 5000         │<────HTTP─────│  Polls at 10 Hz    │
+      │  Endpoint:          │     GET      │                     │
+      │  /joint_actions     │──Response──> │  HTTPEndEffector-  │
+      │                     │     JSON     │  Controller         │
+      └─────────────────────┘              └─────────────────────┘
+               │                                      │
+               v                                      v
+      ┌─────────────────────┐              ┌─────────────────────┐
+      │  Motion Generators  │              │  Robot Control      │
+      │  • Static mode      │              │  • Parse JSON       │
+      │  • Sine mode        │              │  • Extract pose     │
+      │  • Circle mode      │              │  • Visualize target │
+      └─────────────────────┘              │  • (IK pending)     │
+                                           └─────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                         DATA FLOW DIAGRAM                                   │
+└────────────────────────────────────────────────────────────────────────────┘
+
+ Flask Server                           Isaac Sim Application
+ ─────────────                          ─────────────────────
+
+ ┌─────────────┐
+ │   Time      │ ──> Calculate position based on mode
+ │  Counter    │
+ └─────────────┘
+       │
+       v
+ ┌─────────────────────────────────────────────────────┐
+ │ Generate JSON Response                              │
+ │ {                                                    │
+ │   "joint_actions": [x, y, z, roll, pitch, yaw, g], │
+ │   "joints": {...},                                  │
+ │   "timestamp": ...                                  │
+ │ }                                                    │
+ └─────────────────────────────────────────────────────┘
+       │
+       │  HTTP Response (JSON)
+       │
+       v
+             ┌──────────────────────────────────┐
+             │  HTTPEndEffectorController       │
+             │  .fetch_target_pose()            │
+             │   - requests.get(url)            │
+             │   - response.json()              │
+             └──────────────────────────────────┘
+                         │
+                         v
+             ┌──────────────────────────────────┐
+             │  Parse JSON                      │
+             │  - Extract joint_actions array   │
+             │  - position = actions[0:3]       │
+             │  - orientation = actions[3:6]    │
+             │  - gripper = actions[6]          │
+             └──────────────────────────────────┘
+                         │
+                         v
+             ┌──────────────────────────────────┐
+             │  Convert Orientation             │
+             │  euler_angles_to_quat(RPY)       │
+             │  Returns quaternion              │
+             └──────────────────────────────────┘
+                         │
+                         v
+             ┌──────────────────────────────────┐
+             │  Update Visualization            │
+             │  - Move target marker            │
+             │  - Display coordinate frame      │
+             │  - Print status (every 2s)       │
+             └──────────────────────────────────┘
+                         │
+                         v
+             ┌──────────────────────────────────┐
+             │  (FUTURE: IK Solver)             │
+             │  - Compute joint angles          │
+             │  - Apply ArticulationAction      │
+             │  - Move actual robot             │
+             └──────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                       COORDINATE SYSTEMS                                    │
+└────────────────────────────────────────────────────────────────────────────┘
+
+ROBOT BASE FRAME (World Frame):
+                Z↑
+                |
+                |
+                |
+    ┌───────────┴───────────┐
+    │                       │
+    │    Robot Base         │  ───Y→
+    │                       │
+    └───────────────────────┘
+               /
+              /
+             X
+
+    X: Forward (towards front of robot)
+    Y: Left (to the robot's left)
+    Z: Up (vertical)
+
+ORIENTATION (Roll-Pitch-Yaw):
+    Roll:  Rotation around X-axis (radians)
+    Pitch: Rotation around Y-axis (radians)  
+    Yaw:   Rotation around Z-axis (radians)
+    
+    Convention: Intrinsic XYZ Euler angles
+    Rotation order: First Roll, then Pitch, then Yaw
+
+END-EFFECTOR POSE:
+    Position: [x, y, z] in meters
+    Orientation: [roll, pitch, yaw] in radians
+    
+    Example home position:
+    Position: [0.3, 0.0, 0.5]
+    Orientation: [0.0, 0.0, 0.0]
+
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                      CLASS STRUCTURE                                        │
+└────────────────────────────────────────────────────────────────────────────┘
+
+test_flask_server.py
+────────────────────
+┌────────────────────────────────────────┐
+│  PoseGenerator                         │
+│  ───────────────                       │
+│  + mode: str                           │
+│  + amplitude: float                    │
+│  + frequency: float                    │
+│  ───────────────                       │
+│  + generate_pose() -> dict             │
+│    └─> static_pose()                   │
+│    └─> sine_pose(t)                    │
+│    └─> circle_pose(t)                  │
+└────────────────────────────────────────┘
+            │
+            v
+┌────────────────────────────────────────┐
+│  Flask Routes                          │
+│  ────────────                          │
+│  GET /joint_actions                    │
+│  GET /config                           │
+│  GET /health                           │
+│  GET /                                 │
+└────────────────────────────────────────┘
+
+
+ur5_http_control.py
+───────────────────
+┌────────────────────────────────────────┐
+│  HTTPEndEffectorController             │
+│  ─────────────────────────             │
+│  + url: str                            │
+│  + timeout: float                      │
+│  + last_status_time: float             │
+│  ─────────────────────────             │
+│  + fetch_target_pose()                 │
+│    └─> requests.get(url)               │
+│    └─> parse_response()                │
+│  + parse_response(data)                │
+│    └─> extract position                │
+│    └─> extract orientation             │
+│    └─> euler_angles_to_quat()          │
+│  + print_status(position, orientation) │
+└────────────────────────────────────────┘
+            │
+            v
+┌────────────────────────────────────────┐
+│  Main Simulation Loop                  │
+│  ─────────────────────                 │
+│  while simulation_app.is_running():    │
+│    1. Fetch target from HTTP           │
+│    2. Update target visualization      │
+│    3. my_world.step()                  │
+│    4. Print status (every 2s)          │
+└────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                     TIMING DIAGRAM                                          │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Time (seconds)  Flask Server                Isaac Sim
+─────────────   ────────────                ─────────
+0.00            Start listening             Start app, load robot
+                                            Initialize controller
+
+0.10            Waiting for request         │
+                                            v
+                                            Fetch pose (10 Hz)
+                <──────HTTP GET─────────────│
+                │                           │
+                v                           │
+                Generate pose (sine mode)   │
+                t = 0.10                    │
+                x = 0.3 + 0.1*sin(2π*0.5*t) │
+                ─────────Response─────────> │
+                                            │
+                                            v
+                                            Parse: pos=[0.31, 0, 0.5]
+                                            Update visualization
+                                            Step simulation
+                                            
+0.20            Waiting for request         Fetch pose (10 Hz)
+                <──────HTTP GET─────────────│
+                Generate pose, t = 0.20     │
+                ─────────Response─────────> │
+                                            Update visualization
+
+... (repeats every 0.1 seconds)
+
+2.00            Waiting for request         │
+                                            v
+                                            Print status:
+                                            "Target: pos=[0.32, 0, 0.5]..."
+
+4.00            Waiting for request         Print status again
+
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                   FILE DEPENDENCIES                                         │
+└────────────────────────────────────────────────────────────────────────────┘
+
+run_ur5_http.sh
+    │
+    ├──> Checks: Flask server connectivity
+    │           curl http://localhost:5000/joint_actions
+    │
+    └──> Runs: python.sh ur5_http_control.py [args]
+
+ur5_http_control.py
+    │
+    ├──> Python stdlib:  argparse, time
+    │
+    ├──> External:       requests (HTTP client)
+    │                    numpy (array operations)
+    │
+    ├──> Isaac Sim:      isaacsim.core.api.SimulationApp
+    │                    isaacsim.core.api.World
+    │                    isaacsim.core.api.robots.Robot
+    │                    isaacsim.robot.manipulators.SingleManipulator
+    │                    isaacsim.core.utils.rotations.euler_angles_to_quat
+    │
+    └──> HTTP endpoint:  Flask server at configured URL
+
+test_flask_server.py
+    │
+    ├──> Python stdlib:  argparse, time, math
+    │
+    └──> External:       flask (web framework)
+
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                  ERROR HANDLING FLOW                                        │
+└────────────────────────────────────────────────────────────────────────────┘
+
+HTTP Request Attempt
+        │
+        v
+    ┌───────────────┐
+    │ Try GET       │
+    │ requests.get()│
+    └───────────────┘
+        │
+        ├──> Success? ──Yes──> Parse JSON
+        │                      │
+        │                      ├──> Valid format? ──Yes──> Return pose
+        │                      │
+        │                      └──> No ──> ValueError: "Invalid format"
+        │                                   └──> Print warning, continue
+        │
+        └──> No (Exception)
+             │
+             ├──> ConnectionError ──> Print: "Cannot connect to Flask"
+             │                        └──> Continue with last known pose
+             │
+             ├──> Timeout ──────────> Print: "Request timeout"
+             │                        └──> Continue with last known pose
+             │
+             └──> Other Exception ──> Print: "Unexpected error"
+                                      └──> Continue with last known pose
+
+All errors are non-fatal - simulation continues running
+
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│              MOTION MODES (Test Server)                                     │
+└────────────────────────────────────────────────────────────────────────────┘
+
+MODE 1: Static
+──────────────
+    Position: Fixed at [0.3, 0.0, 0.5]
+    Orientation: Fixed at [0.0, 0.0, 0.0]
+    Gripper: Fixed at 0.5
+    
+    Use case: Testing basic connectivity
+
+
+MODE 2: Sine (default)
+──────────────────────
+    x(t) = 0.3 + amplitude * sin(2π * frequency * t)
+    y(t) = 0.0
+    z(t) = 0.5
+    
+    Default: amplitude=0.1m, frequency=0.5Hz
+    Motion: Back and forth along X-axis
+    Period: 2 seconds (for default frequency)
+    
+    Use case: Testing smooth continuous motion
+
+
+MODE 3: Circle
+──────────────
+    x(t) = 0.3 + amplitude * cos(2π * frequency * t)
+    y(t) = 0.0 + amplitude * sin(2π * frequency * t)
+    z(t) = 0.5
+    
+    Default: amplitude=0.1m, frequency=0.5Hz
+    Motion: Circular path in XY plane
+    Period: 2 seconds (for default frequency)
+    
+    Use case: Testing 2D motion, path following
+
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                    FUTURE ENHANCEMENTS                                      │
+└────────────────────────────────────────────────────────────────────────────┘
+
+PHASE 1: IK Integration (NEXT STEP)
+───────────────────────────────────
+    Current:  Target pose displayed, robot doesn't move
+    Goal:     Compute joint angles and move robot
+    
+    Implementation:
+    1. Import LulaKinematicsSolver
+    2. Load UR5 robot description and URDF
+    3. In main loop, call compute_inverse_kinematics()
+    4. Apply ArticulationAction to robot
+    
+    Code addition (~20 lines):
+        from omni.isaac.motion_generation import LulaKinematicsSolver
+        
+        kinematics = LulaKinematicsSolver(...)
+        
+        joint_pos, success = kinematics.compute_inverse_kinematics(
+            target_position=position,
+            target_orientation=orientation_quat
+        )
+        if success:
+            action = ArticulationAction(joint_positions=joint_pos)
+            robot.apply_action(action)
+
+
+PHASE 2: Gripper Control
+────────────────────────
+    Current:  Gripper value parsed but not used
+    Goal:     Control gripper opening/closing
+    
+    Implementation:
+    1. Get gripper controller from manipulator
+    2. Scale gripper value (0-1) to gripper range
+    3. Apply gripper action
+    
+    Code addition (~10 lines):
+        gripper_value = joint_actions[6]
+        gripper.apply_action(
+            ArticulationAction(joint_positions=[gripper_value])
+        )
+
+
+PHASE 3: Trajectory Smoothing
+─────────────────────────────
+    Current:  Instantaneous jumps between poses
+    Goal:     Smooth interpolated motion
+    
+    Implementation:
+    1. Store previous target pose
+    2. Interpolate between previous and new pose
+    3. Generate intermediate waypoints
+    4. Velocity/acceleration limiting
+    
+    Options:
+    - Linear interpolation (simple)
+    - Cubic spline interpolation (smoother)
+    - RMPflow (reactive, collision-aware)
+
+
+PHASE 4: Collision Avoidance
+────────────────────────────
+    Current:  No obstacle awareness
+    Goal:     Avoid collisions with environment
+    
+    Implementation options:
+    1. Use RMPflow motion planner (built into Isaac Sim)
+    2. Pre-check IK solutions for collisions
+    3. Add safety zones around obstacles
+    4. Implement emergency stop on collision
+
+════════════════════════════════════════════════════════════════════════════════
+                              END OF SYSTEM DIAGRAM
+════════════════════════════════════════════════════════════════════════════════

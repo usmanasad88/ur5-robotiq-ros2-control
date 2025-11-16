@@ -1,0 +1,35 @@
+{
+    "version": "1.0",
+    "file_records": [
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Robots/Robotiq/2F-85/Robotiq_2F_85_edit.usd",
+            "source_hash": "74e83f023d8288f667a2f14e3d4fbe1ab3b28d5f",
+            "target_url": "./Robots/Robotiq/2F-85/Robotiq_2F_85_edit.usd",
+            "target_hash": "3f4280a13f61a96494b8193510cea9f404ae0baa"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Robots/Robotiq/2F-85/configuration/Robotiq_2F_85_robot.usd",
+            "source_hash": "cfa5e5cd937a1f79a8e8e7714c08434a1a6d504a",
+            "target_url": "./Robots/Robotiq/2F-85/configuration/Robotiq_2F_85_robot.usd",
+            "target_hash": "ddd2c6ba1f6d5f5af3f08048d7afa28bf5e13f0a"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Robots/Robotiq/2F-85/payloads/Robotiq_2F_85_base.usda",
+            "source_hash": "9ce9af5055a9118382bc2fda7da794b41cbc3190",
+            "target_url": "./Robots/Robotiq/2F-85/payloads/Robotiq_2F_85_base.usda",
+            "target_hash": "46634924fd3df2eab885ca469f3bbd78a4e43173"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Robots/Robotiq/2F-85/payloads/Robotiq_2F_85_phyisics_loop.usda",
+            "source_hash": "36a2a275c9baf95d166e9734fc8f45f523450455",
+            "target_url": "./Robots/Robotiq/2F-85/payloads/Robotiq_2F_85_phyisics_loop.usda",
+            "target_hash": "d7f90335184d180d43a0b8c1b7c9456fbaa7ef84"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Robots/Robotiq/2F-85/payloads/Robotiq_2F_85_phyisics_mimic.usda",
+            "source_hash": "76bd5f3d89a94f100859d3799b07bdfa7400dfff",
+            "target_url": "./Robots/Robotiq/2F-85/payloads/Robotiq_2F_85_phyisics_mimic.usda",
+            "target_hash": "94f31d1fb1b243edfa296ad1a544e25a2f84628f"
+        }
+    ]
+}

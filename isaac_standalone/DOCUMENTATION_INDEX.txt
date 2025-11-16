@@ -1,0 +1,399 @@
+═══════════════════════════════════════════════════════════════════════════════
+              ISAAC SIM UR ROBOT CONTROL - DOCUMENTATION INDEX
+═══════════════════════════════════════════════════════════════════════════════
+
+📖 START HERE: Complete guide to all files and documentation
+    
+This index helps you find the right documentation for your needs.
+
+═══════════════════════════════════════════════════════════════════════════════
+🚀 GETTING STARTED
+═══════════════════════════════════════════════════════════════════════════════
+
+1. START_HERE.md ⭐ RECOMMENDED FIRST READ
+   ➤ Quick overview of all files
+   ➤ File structure and sizes
+   ➤ Quick start options (3 modes: basic, HTTP, ROS 2)
+   ➤ What each file does
+   ➤ Key differences summary
+   
+   Read this if: You're new to this project
+
+2. QUICKSTART.md
+   ➤ Fast reference for common commands
+   ➤ Command-line argument tables
+   ➤ Example usage patterns
+   ➤ No explanations, just commands
+   
+   Read this if: You know what you want to do, just need the syntax
+
+3. README.md
+   ➤ Complete project documentation
+   ➤ Detailed description of each script
+   ➤ Full usage examples with explanations
+   ➤ Understanding the code structure
+   ➤ Technical notes
+   
+   Read this if: You want comprehensive understanding
+
+═══════════════════════════════════════════════════════════════════════════════
+🌐 HTTP CONTROL DOCUMENTATION
+═══════════════════════════════════════════════════════════════════════════════
+
+4. HTTP_QUICKSTART.txt ⭐ START HERE FOR HTTP CONTROL
+   ➤ Two-terminal workflow guide
+   ➤ Copy-paste commands
+   ➤ Expected output examples
+   ➤ Quick troubleshooting
+   ➤ Next steps for IK integration
+   
+   Read this if: You want to use HTTP control RIGHT NOW
+
+5. HTTP_CONTROL.md
+   ➤ Complete HTTP control system documentation
+   ➤ Architecture and design
+   ➤ JSON API specification
+   ➤ Configuration options
+   ➤ Advanced usage examples
+   ➤ Detailed troubleshooting
+   
+   Read this if: You need deep understanding of HTTP control
+
+6. HTTP_FEATURE_SUMMARY.txt
+   ➤ What's implemented and what's pending
+   ➤ File statistics
+   ➤ Known limitations
+   ➤ Future enhancements roadmap
+   ➤ Complete feature checklist
+   
+   Read this if: You want to know exactly what works and what doesn't
+
+7. SYSTEM_DIAGRAM.txt
+   ➤ Visual diagrams of system architecture
+   ➤ Data flow diagrams
+   ➤ Class structure
+   ➤ Timing diagrams
+   ➤ Coordinate system explanations
+   
+   Read this if: You're a visual learner or need to understand internals
+
+═══════════════════════════════════════════════════════════════════════════════
+🔧 TECHNICAL REFERENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+8. API_CHANGES.md
+   ➤ Isaac Sim 4.x to 5.0.0 API changes
+   ➤ How the bug was fixed
+   ➤ Before/after code examples
+   ➤ Why Articulation → Robot change was needed
+   
+   Read this if: You encountered API errors or are upgrading
+
+9. FIXED.md
+   ➤ Quick summary of the fix
+   ➤ What was broken
+   ➤ What was changed
+   ➤ Test verification results
+   
+   Read this if: You just want to know it's fixed
+
+10. SUMMARY.txt
+    ➤ Visual ASCII art summary
+    ➤ Feature comparison table
+    ➤ File tree structure
+    ➤ Quick reference cards
+    
+    Read this if: You want a visual overview
+
+═══════════════════════════════════════════════════════════════════════════════
+📁 PYTHON SCRIPTS
+═══════════════════════════════════════════════════════════════════════════════
+
+BASIC SCRIPTS:
+
+11. simple_test.py
+    ➤ Minimal example (~35 lines)
+    ➤ Just loads robot and runs simulation
+    ➤ Good for testing Isaac Sim installation
+    
+    Use this if: You want the simplest possible example
+
+12. ur10_import.py
+    ➤ Basic UR5/UR10 loader (~150 lines)
+    ➤ Command-line arguments for robot selection
+    ➤ Headless and test modes
+    
+    Use this if: You want basic robot loading with options
+
+ADVANCED SCRIPTS:
+
+13. ur_robot_advanced.py
+    ➤ Advanced controller (~300 lines)
+    ➤ Three control modes: static, animated, interactive
+    ➤ CSV recording capability
+    ➤ URDF import support
+    
+    Use this if: You want predefined motion sequences
+
+14. ur_from_ros2_urdf.py
+    ➤ ROS 2 workspace integration (~200 lines)
+    ➤ Auto-finds URDF in ROS 2 install space
+    ➤ Proper physics configuration
+    
+    Use this if: You have ROS 2 UR packages installed
+
+HTTP CONTROL SCRIPTS:
+
+15. ur5_http_control.py ⭐ NEW
+    ➤ HTTP-based end-effector control (~450 lines)
+    ➤ Reads poses from Flask endpoint
+    ➤ HTTPEndEffectorController class
+    ➤ Configurable update rate
+    
+    Use this if: You want to control robot via HTTP
+
+16. test_flask_server.py ⭐ NEW
+    ➤ Test Flask server (~220 lines)
+    ➤ Three motion modes: static, sine, circle
+    ➤ Configurable amplitude/frequency
+    ➤ REST API with /joint_actions endpoint
+    
+    Use this if: You need a test server for development
+
+═══════════════════════════════════════════════════════════════════════════════
+🔨 HELPER SCRIPTS
+═══════════════════════════════════════════════════════════════════════════════
+
+17. run_ur_robot.sh
+    ➤ Helper for basic scripts
+    ➤ Sets up environment
+    ➤ Runs ur10_import.py with arguments
+    
+    Use this: ./run_ur_robot.sh --robot ur5
+
+18. run_ur5_http.sh ⭐ NEW
+    ➤ Helper for HTTP control
+    ➤ Checks Flask server connectivity first
+    ➤ Runs ur5_http_control.py with arguments
+    
+    Use this: ./run_ur5_http.sh --rate 10
+
+19. run_tests.sh
+    ➤ Automated test suite
+    ➤ Tests all scripts in sequence
+    ➤ Validates functionality
+    
+    Use this: ./run_tests.sh
+
+20. setup_env.sh
+    ➤ Environment configuration
+    ➤ Sets up Isaac Sim paths
+    ➤ Checks prerequisites
+    
+    Use this: source setup_env.sh
+
+═══════════════════════════════════════════════════════════════════════════════
+📊 DOCUMENTATION BY USE CASE
+═══════════════════════════════════════════════════════════════════════════════
+
+"I'm new and want to get started quickly"
+➤ Read: START_HERE.md
+➤ Run: ./run_ur_robot.sh --test
+➤ Then: QUICKSTART.md for more commands
+
+"I want to use HTTP control"
+➤ Read: HTTP_QUICKSTART.txt
+➤ Terminal 1: python3 test_flask_server.py --mode sine
+➤ Terminal 2: ./run_ur5_http.sh
+➤ Then: HTTP_CONTROL.md for details
+
+"I encountered an error"
+➤ If API error: Read API_CHANGES.md
+➤ If HTTP error: Read HTTP_CONTROL.md "Troubleshooting"
+➤ If general: Read README.md "Understanding the Code"
+
+"I want to understand the system architecture"
+➤ Read: SYSTEM_DIAGRAM.txt
+➤ Then: HTTP_CONTROL.md "Architecture"
+➤ Then: Look at actual code
+
+"I want to integrate IK solver"
+➤ Read: HTTP_QUICKSTART.txt "NEXT STEPS TO ENABLE MOTION"
+➤ Read: HTTP_FEATURE_SUMMARY.txt "PHASE 1: IK Integration"
+➤ Modify: ur5_http_control.py
+
+"I want to customize motion patterns"
+➤ Modify: test_flask_server.py (add new modes)
+➤ Or: Create your own Flask server
+➤ Reference: HTTP_CONTROL.md "JSON API Specification"
+
+"I want to load custom URDF"
+➤ Use: ur_robot_advanced.py with --urdf flag
+➤ Or: ur_from_ros2_urdf.py for ROS 2 URDFs
+➤ Reference: README.md "Example 4"
+
+"I want to record robot motion"
+➤ Use: ur_robot_advanced.py with --record flag
+➤ Creates: robot_joint_states.csv
+➤ Reference: README.md "ur_robot_advanced.py"
+
+═══════════════════════════════════════════════════════════════════════════════
+📈 RECOMMENDED LEARNING PATH
+═══════════════════════════════════════════════════════════════════════════════
+
+BEGINNER PATH:
+1. Read START_HERE.md (5 minutes)
+2. Run ./run_ur_robot.sh --test (2 minutes)
+3. Read QUICKSTART.md (3 minutes)
+4. Try different --mode options (10 minutes)
+5. Read README.md for deeper understanding (15 minutes)
+
+HTTP CONTROL PATH:
+1. Read HTTP_QUICKSTART.txt (5 minutes)
+2. Start Flask server (1 minute)
+3. Start Isaac Sim with HTTP control (2 minutes)
+4. Observe behavior (5 minutes)
+5. Read HTTP_CONTROL.md (15 minutes)
+6. Try different motion modes (10 minutes)
+7. Read SYSTEM_DIAGRAM.txt (10 minutes)
+8. Plan IK integration (see HTTP_FEATURE_SUMMARY.txt)
+
+DEVELOPER PATH:
+1. Read START_HERE.md (5 minutes)
+2. Read README.md completely (20 minutes)
+3. Read API_CHANGES.md (understanding the fix) (10 minutes)
+4. Read HTTP_CONTROL.md (architecture) (15 minutes)
+5. Read SYSTEM_DIAGRAM.txt (internals) (15 minutes)
+6. Study actual Python code (30 minutes)
+7. Run tests and experiment (30 minutes)
+
+═══════════════════════════════════════════════════════════════════════════════
+🔍 FILE QUICK REFERENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+DOCUMENTATION (10 files, ~50KB total):
+├── START_HERE.md              - Project overview ⭐ READ FIRST
+├── README.md                  - Complete documentation
+├── QUICKSTART.md              - Quick command reference
+├── API_CHANGES.md             - API compatibility fix details
+├── FIXED.md                   - Quick fix summary
+├── SUMMARY.txt                - Visual ASCII summary
+├── HTTP_CONTROL.md            - HTTP control documentation ⭐ NEW
+├── HTTP_QUICKSTART.txt        - HTTP quick start ⭐ NEW
+├── HTTP_FEATURE_SUMMARY.txt   - HTTP feature status ⭐ NEW
+├── SYSTEM_DIAGRAM.txt         - System diagrams ⭐ NEW
+└── DOCUMENTATION_INDEX.txt    - This file
+
+PYTHON SCRIPTS (6 files, ~35KB total):
+├── simple_test.py             - Minimal example (35 lines)
+├── ur10_import.py             - Basic loader (150 lines)
+├── ur_robot_advanced.py       - Advanced controller (300 lines)
+├── ur_from_ros2_urdf.py       - ROS 2 integration (200 lines)
+├── ur5_http_control.py        - HTTP control ⭐ NEW (450 lines)
+└── test_flask_server.py       - Test server ⭐ NEW (220 lines)
+
+SHELL SCRIPTS (4 files, ~10KB total):
+├── run_ur_robot.sh            - Basic helper
+├── run_tests.sh               - Test suite
+├── setup_env.sh               - Environment setup
+└── run_ur5_http.sh            - HTTP helper ⭐ NEW
+
+TOTAL: 20 files, ~95KB of code and documentation
+
+═══════════════════════════════════════════════════════════════════════════════
+💡 TIPS
+═══════════════════════════════════════════════════════════════════════════════
+
+• Start simple: Use simple_test.py before advanced scripts
+• Read docs first: Save time by understanding before running
+• Test incrementally: Try one feature at a time
+• Check logs: Output messages are detailed and helpful
+• Use --headless: Faster execution without GUI
+• Keep Flask running: HTTP control needs the server active
+• Check connectivity: run_ur5_http.sh verifies server first
+• Import errors OK: VS Code shows errors for Isaac Sim modules (normal)
+
+═══════════════════════════════════════════════════════════════════════════════
+❓ COMMON QUESTIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+Q: Which file should I read first?
+A: START_HERE.md for overview, then HTTP_QUICKSTART.txt for HTTP control
+
+Q: How do I know if HTTP control is working?
+A: You'll see "Target: pos=[x, y, z]" messages every 2 seconds
+
+Q: Why doesn't the robot move in HTTP control mode?
+A: IK solver not yet integrated. See HTTP_FEATURE_SUMMARY.txt
+
+Q: Can I use my own Flask server?
+A: Yes! Just return JSON matching the format in HTTP_CONTROL.md
+
+Q: Which Python script should I use?
+A: simple_test.py for learning, ur5_http_control.py for HTTP control
+
+Q: How do I add IK solver?
+A: See HTTP_QUICKSTART.txt "NEXT STEPS TO ENABLE MOTION"
+
+Q: What's the difference between all these docs?
+A: See "DOCUMENTATION BY USE CASE" section above
+
+Q: Import errors in VS Code?
+A: Normal! Isaac Sim modules only available in Isaac Sim Python
+
+═══════════════════════════════════════════════════════════════════════════════
+✅ CHECKLIST FOR FIRST-TIME USERS
+═══════════════════════════════════════════════════════════════════════════════
+
+Getting Started:
+□ Read START_HERE.md
+□ Verify Isaac Sim installation at /home/mani/isaac-sim-standalone-5.0.0-linux-x86_64
+□ Run basic test: ./run_ur_robot.sh --test
+□ Confirm robot loads successfully
+
+HTTP Control:
+□ Install Python packages: pip3 install flask requests
+□ Read HTTP_QUICKSTART.txt
+□ Terminal 1: python3 test_flask_server.py --mode sine
+□ Terminal 2: ./run_ur5_http.sh
+□ Verify status messages appear
+□ Observe target marker visualization
+
+Next Steps:
+□ Read HTTP_CONTROL.md for full understanding
+□ Experiment with different motion modes
+□ Read SYSTEM_DIAGRAM.txt to understand architecture
+□ Plan IK integration (see HTTP_FEATURE_SUMMARY.txt)
+
+═══════════════════════════════════════════════════════════════════════════════
+🎯 WHAT TO READ BASED ON YOUR GOAL
+═══════════════════════════════════════════════════════════════════════════════
+
+Goal: "Just show me how to run it"
+Files: HTTP_QUICKSTART.txt (HTTP) or QUICKSTART.md (basic)
+Time: 5 minutes
+
+Goal: "I want to understand everything"
+Files: START_HERE.md → README.md → HTTP_CONTROL.md → SYSTEM_DIAGRAM.txt
+Time: 1 hour
+
+Goal: "I need to fix the API error"
+Files: API_CHANGES.md → FIXED.md
+Time: 10 minutes
+
+Goal: "I want to customize HTTP control"
+Files: HTTP_CONTROL.md → ur5_http_control.py code → test_flask_server.py code
+Time: 30 minutes
+
+Goal: "I need visual diagrams"
+Files: SYSTEM_DIAGRAM.txt → SUMMARY.txt
+Time: 15 minutes
+
+Goal: "What's implemented and what's not?"
+Files: HTTP_FEATURE_SUMMARY.txt
+Time: 10 minutes
+
+═══════════════════════════════════════════════════════════════════════════════
+                           END OF DOCUMENTATION INDEX
+                      You now have a complete map of all files!
+═══════════════════════════════════════════════════════════════════════════════

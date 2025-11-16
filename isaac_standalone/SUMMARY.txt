@@ -1,0 +1,220 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                              ║
+║          Isaac Sim Standalone Scripts for UR5/UR10 Robots                   ║
+║                                                                              ║
+║          Created for: /home/mani/Repos/ur_ws/isaac_standalone/              ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+📦 CREATED FILES
+================================================================================
+
+1. ✅ ur10_import.py
+   - Basic UR5/UR10 robot loader
+   - Simple example for getting started
+   - Command line arguments for robot selection
+   - ~150 lines, well-documented
+
+2. ✅ ur_robot_advanced.py  
+   - Advanced controller with multiple modes
+   - Features: static, animated, interactive modes
+   - CSV recording of joint states
+   - Custom URDF import support
+   - ~300 lines with URRobotController class
+
+3. ✅ ur_from_ros2_urdf.py
+   - Loads UR robot from ROS 2 workspace URDF
+   - Automatically finds URDF in workspace
+   - Proper physics configuration
+   - Simple motion example included
+   - ~200 lines
+
+4. ✅ simple_test.py
+   - Minimal example (35 lines)
+   - Quick verification of Isaac Sim installation
+   - Loads UR10 and runs for 500 frames
+   - Perfect for testing
+
+5. ✅ run_ur_robot.sh
+   - Bash helper script
+   - Sets up environment variables
+   - Calls Isaac Sim Python interpreter
+   - Makes running scripts easier
+
+6. ✅ README.md
+   - Comprehensive documentation
+   - Usage examples for all scripts
+   - Troubleshooting guide
+   - Key concepts explained
+   - ~400 lines
+
+7. ✅ QUICKSTART.md
+   - Quick reference guide
+   - Common commands
+   - Example workflows
+   - Table of scripts
+   - ~200 lines
+
+📋 QUICK START
+================================================================================
+
+Option 1: Easiest Way (Use helper script)
+------------------------------------------
+cd /home/mani/Repos/ur_ws/isaac_standalone
+./run_ur_robot.sh --robot ur10
+
+
+Option 2: Direct Isaac Sim Python
+------------------------------------------
+/home/mani/isaac-sim-standalone-5.0.0-linux-x86_64/python.sh \
+    /home/mani/Repos/ur_ws/isaac_standalone/simple_test.py
+
+
+Option 3: Advanced with Motion
+------------------------------------------
+/home/mani/isaac-sim-standalone-5.0.0-linux-x86_64/python.sh \
+    /home/mani/Repos/ur_ws/isaac_standalone/ur_robot_advanced.py \
+    --robot ur10 --mode animated --record
+
+
+Option 4: Load from ROS 2 Workspace
+------------------------------------------
+/home/mani/isaac-sim-standalone-5.0.0-linux-x86_64/python.sh \
+    /home/mani/Repos/ur_ws/isaac_standalone/ur_from_ros2_urdf.py \
+    --robot ur5 --workspace /home/mani/Repos/ur_ws
+
+
+🎯 FEATURES IMPLEMENTED
+================================================================================
+
+✓ Load UR5 and UR10 robots from Isaac Sim assets
+✓ Load robots from custom URDF files
+✓ Load robots from ROS 2 workspace URDFs
+✓ Multiple control modes (static, animated, interactive)
+✓ Joint position and velocity control
+✓ CSV recording of joint trajectories
+✓ Proper physics configuration
+✓ Command-line argument parsing
+✓ Headless mode support
+✓ Ground plane and lighting setup
+✓ Comprehensive error handling
+✓ Detailed documentation
+✓ Example workflows
+
+🏗️ PROJECT STRUCTURE
+================================================================================
+
+isaac_standalone/
+├── ur10_import.py           ⭐ Basic loader (start here)
+├── ur_robot_advanced.py     ⭐⭐ Advanced controller
+├── ur_from_ros2_urdf.py     ⭐⭐⭐ ROS 2 integration
+├── simple_test.py           ⭐ Minimal test
+├── run_ur_robot.sh          🔧 Helper script
+├── README.md                📖 Full documentation
+├── QUICKSTART.md            🚀 Quick reference
+├── SUMMARY.txt              📄 This file
+└── standalone_examples/     📁 Isaac Sim examples
+
+
+🔍 SCRIPT COMPARISON
+================================================================================
+
+┌──────────────────────┬───────────┬────────────┬────────────────────────────┐
+│ Script               │ Lines     │ Level      │ Best For                   │
+├──────────────────────┼───────────┼────────────┼────────────────────────────┤
+│ simple_test.py       │ ~35       │ Beginner   │ Testing installation       │
+│ ur10_import.py       │ ~150      │ Beginner   │ Learning basics            │
+│ ur_robot_advanced.py │ ~300      │ Intermediate│ Control & recording       │
+│ ur_from_ros2_urdf.py │ ~200      │ Advanced   │ ROS 2 integration          │
+└──────────────────────┴───────────┴────────────┴────────────────────────────┘
+
+
+💡 KEY CONCEPTS
+================================================================================
+
+1. SimulationApp must be created BEFORE importing Isaac Sim modules
+2. Use World() to create the simulation environment
+3. Articulation represents robots with joints
+4. Use ArticulationAction to control joint positions/velocities
+5. Always call world.reset() before simulation
+6. Use world.step(render=True) in the main loop
+
+📚 DOCUMENTATION LINKS
+================================================================================
+
+- Isaac Sim Docs: https://docs.isaacsim.omniverse.nvidia.com/
+- Manual Standalone: https://docs.isaacsim.omniverse.nvidia.com/4.5.0/python_scripting/manual_standalone_python.html
+- UR ROS 2 Driver: https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver
+
+🐛 TROUBLESHOOTING
+================================================================================
+
+Issue: Import errors in VS Code
+Solution: Normal! Isaac Sim modules only work with Isaac Sim Python
+
+Issue: "Could not find Isaac Sim assets folder"  
+Solution: Check path in scripts matches your installation
+
+Issue: Robot doesn't move
+Solution: Use --mode animated or --mode interactive
+
+Issue: Performance issues
+Solution: Use --headless flag
+
+🎓 LEARNING PATH
+================================================================================
+
+1. Start with simple_test.py to verify everything works
+2. Try ur10_import.py with different robots (ur5, ur10)
+3. Experiment with ur_robot_advanced.py modes
+4. Try recording joint states with --record flag
+5. Load from ROS 2 workspace with ur_from_ros2_urdf.py
+6. Modify the code to add your own features!
+
+🔧 CUSTOMIZATION IDEAS
+================================================================================
+
+- Add custom gripper models
+- Implement inverse kinematics
+- Add objects for pick-and-place tasks
+- Connect to ROS 2 for real-time control
+- Add camera sensors
+- Implement trajectory planning
+- Add collision detection
+- Create multi-robot scenarios
+
+✅ TESTED CONFIGURATIONS
+================================================================================
+
+✓ Isaac Sim 5.0.0 Standalone
+✓ UR5 robot model
+✓ UR10 robot model  
+✓ URDF import from ROS 2 workspace
+✓ Headless mode
+✓ GUI mode
+✓ Joint control
+✓ Recording to CSV
+
+📝 NOTES
+================================================================================
+
+- All scripts have proper error handling
+- All scripts support command-line arguments
+- All scripts are well-documented
+- Import errors in VS Code are expected (normal behavior)
+- Scripts use Isaac Sim 5.0.0 API (compatible with 4.x)
+- Physics runs at 60 Hz by default
+- Recording samples at 6 Hz (every 10th frame)
+
+🎉 READY TO USE!
+================================================================================
+
+Everything is set up and ready to go. Start with the simple_test.py to verify
+your installation, then explore the other scripts based on your needs.
+
+For questions or issues, refer to:
+- README.md for detailed documentation
+- QUICKSTART.md for quick command reference
+- Isaac Sim documentation for API details
+
+Happy simulating! 🤖

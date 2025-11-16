@@ -1,0 +1,290 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                              ║
+║          UR5 HTTP End-Effector Control - Quick Start Guide                  ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+📦 NEW FILES CREATED
+================================================================================
+1. ✅ ur5_http_control.py       - Main Isaac Sim application (~450 lines)
+2. ✅ run_ur5_http.sh            - Helper script to run the application
+3. ✅ test_flask_server.py       - Test Flask server for development (~220 lines)
+4. ✅ HTTP_CONTROL.md            - Comprehensive documentation
+5. ✅ HTTP_QUICKSTART.txt        - This file
+
+🚀 QUICK START (2 TERMINALS)
+================================================================================
+
+Terminal 1: Start Flask Test Server
+------------------------------------
+cd /home/mani/Repos/ur_ws/isaac_standalone
+python3 test_flask_server.py --mode sine
+
+# Or use your own Flask server:
+# python /path/to/your/flask_server.py
+
+
+Terminal 2: Start Isaac Sim
+----------------------------
+cd /home/mani/Repos/ur_ws/isaac_standalone
+./run_ur5_http.sh
+
+# Or with custom server:
+# ./run_ur5_http.sh http://localhost:8080 /api/pose
+
+
+📋 WHAT IT DOES
+================================================================================
+1. Loads UR5 robot in Isaac Sim
+2. Connects to Flask server at http://localhost:5000/joint_actions
+3. Reads target end-effector poses every 0.1 seconds (10 Hz)
+4. Updates robot end-effector position/orientation
+5. Displays status in console
+
+The Flask endpoint should return JSON like:
+{
+    "joint_actions": [x, y, z, roll, pitch, yaw, gripper],
+    "joints": {"x": ..., "y": ..., "z": ..., ...},
+    "timestamp": 1759376486.86
+}
+
+
+🔧 TEST SERVER MODES
+================================================================================
+The included test server has 3 modes:
+
+1. static  - Returns small constant deltas (default)
+   python3 test_flask_server.py --mode static
+
+2. sine    - Sinusoidal motion in x-y plane
+   python3 test_flask_server.py --mode sine
+
+3. circle  - Circular motion
+   python3 test_flask_server.py --mode circle --amplitude 0.02
+
+Change mode at runtime:
+   curl http://localhost:5000/config/mode/circle
+   curl http://localhost:5000/config/amplitude/0.02
+   curl http://localhost:5000/config/frequency/1.0
+
+
+📊 COMMAND OPTIONS
+================================================================================
+
+Main Script (ur5_http_control.py):
+-----------------------------------
+--server URL          Flask server URL (default: http://localhost:5000)
+--endpoint PATH       API endpoint (default: /joint_actions)
+--headless            Run without GUI
+--update-rate HZ      Control update rate (default: 10.0 Hz)
+--timeout SEC         HTTP timeout (default: 1.0s)
+
+Example:
+/home/mani/isaac-sim-standalone-5.0.0-linux-x86_64/python.sh ur5_http_control.py \
+    --server http://localhost:5000 \
+    --update-rate 20.0 \
+    --headless
+
+
+Test Server (test_flask_server.py):
+------------------------------------
+--host HOST           Host to bind (default: 0.0.0.0)
+--port PORT           Port to bind (default: 5000)
+--mode MODE           Motion mode: static, sine, circle
+--amplitude AMP       Motion amplitude in meters (default: 0.01)
+--frequency FREQ      Motion frequency in Hz (default: 0.5)
+
+Example:
+python3 test_flask_server.py --mode circle --amplitude 0.02 --frequency 1.0
+
+
+🧪 TESTING WORKFLOW
+================================================================================
+
+Step 1: Test Flask Server Alone
+--------------------------------
+# Start server
+python3 test_flask_server.py --mode sine
+
+# In another terminal, test with curl:
+curl http://localhost:5000/joint_actions
+curl http://localhost:5000/health
+
+# Should see JSON output
+
+
+Step 2: Start Isaac Sim with Test Server
+-----------------------------------------
+# Terminal 1: Flask server
+python3 test_flask_server.py --mode sine
+
+# Terminal 2: Isaac Sim
+./run_ur5_http.sh
+
+# You should see:
+# - UR5 robot loads
+# - "Connected to server" message
+# - Periodic status updates with target poses
+
+
+Step 3: Use Your Own Flask Server
+----------------------------------
+# Start your server that returns poses
+python /home/mani/Repos/ur_ws/scripts_for_coding_agent_reference/flask_server.py
+
+# Start Isaac Sim
+./run_ur5_http.sh http://localhost:5000 /joint_actions
+
+
+📈 EXPECTED OUTPUT
+================================================================================
+
+Test Server Output:
+-------------------
+╔══════════════════════════════════════════════════════════════╗
+║          UR5 HTTP Control Test Server                       ║
+╚══════════════════════════════════════════════════════════════╝
+
+Mode: sine
+Amplitude: 0.01 m
+Frequency: 0.5 Hz
+
+Server starting at http://0.0.0.0:5000
+...
+
+
+Isaac Sim Output:
+-----------------
+╔══════════════════════════════════════════════════════════════╗
+║ HTTP End-Effector Controller initialized                    ║
+╚══════════════════════════════════════════════════════════════╝
+Server URL: http://localhost:5000/joint_actions
+Update Rate: 10.0 Hz
+...
+
+✓ Connected to server: http://localhost:5000/joint_actions
+
+Frame 60:
+  Target position: [0.0099 0.0032 0.0000]
+  New position: [0.5234 0.1234 0.5123]
+  Target euler: [0.000 0.000 0.001]
+
+[2.0s] Connected | Target: pos=[0.0099, 0.0032, 0.0000] quat=[...]
+
+
+🐛 TROUBLESHOOTING
+================================================================================
+
+Problem: "Cannot connect to server"
+Solution: Start Flask server first, check firewall
+
+Problem: "Request timeout"
+Solution: Increase --timeout or check server response time
+
+Problem: "Error parsing response"
+Solution: Verify JSON format matches expected structure
+
+Problem: Robot not moving
+Solution: Currently displays targets but needs IK integration (see note below)
+
+Problem: Import errors in VS Code
+Solution: Normal! Use Isaac Sim Python to run
+
+
+⚠️ IMPORTANT NOTES
+================================================================================
+
+1. DELTAS vs ABSOLUTE POSES
+   The script treats received values as DELTAS (incremental changes):
+   new_position = current_position + target_position
+   
+   If your server sends ABSOLUTE poses, modify line ~336 in ur5_http_control.py
+
+2. INVERSE KINEMATICS
+   The current version DISPLAYS target poses but doesn't fully control the robot.
+   Full motion control requires IK solver integration (future enhancement).
+   
+   Current: Reads poses, computes targets, prints to console
+   Future: Add Lula IK solver to compute joint positions and move robot
+
+3. GRIPPER CONTROL
+   Gripper value is received but not yet implemented.
+   Add gripper control in future versions.
+
+
+🔮 NEXT STEPS TO ENABLE MOTION
+================================================================================
+
+To make the robot actually move to target poses:
+
+1. Integrate IK Solver (Lula):
+   from isaacsim.robot_motion.lula import LulaKinematicsSolver
+   ik_solver = LulaKinematicsSolver(...)
+
+2. Compute Joint Positions:
+   joint_positions = ik_solver.compute_inverse_kinematics(target_pose)
+
+3. Apply to Robot:
+   articulation_controller.apply_action(
+       ArticulationAction(joint_positions=joint_positions)
+   )
+
+4. Add Motion Planning:
+   - Trajectory smoothing
+   - Collision avoidance
+   - Joint limit checking
+
+
+📚 DOCUMENTATION
+================================================================================
+
+Full documentation: HTTP_CONTROL.md
+Flask integration: See HTTP_CONTROL.md "Integration with Your Flask Server"
+API reference: Isaac Sim docs at docs.isaacsim.omniverse.nvidia.com
+Examples: See standalone_examples/api/isaacsim.robot.manipulators/
+
+
+🎯 USE CASES
+================================================================================
+
+✓ Visual teleoperation
+✓ Testing policy learning algorithms
+✓ Recording demonstrations
+✓ Debugging motion commands
+✓ Validating control systems
+✓ Remote robot operation
+✓ Multi-agent coordination
+
+
+🛠️ CUSTOMIZATION
+================================================================================
+
+Modify ur5_http_control.py to:
+- Change coordinate frame transformations
+- Add velocity control
+- Implement different IK methods
+- Add safety constraints
+- Log data to files
+- Visualize trajectories
+- Add multiple robots
+
+
+✅ FILES LOCATION
+================================================================================
+/home/mani/Repos/ur_ws/isaac_standalone/
+├── ur5_http_control.py        - Main application
+├── run_ur5_http.sh             - Helper runner
+├── test_flask_server.py        - Test server
+├── HTTP_CONTROL.md             - Full documentation
+└── HTTP_QUICKSTART.txt         - This file
+
+
+🎉 READY TO USE!
+================================================================================
+
+Everything is set up. Start with:
+
+Terminal 1:  python3 test_flask_server.py --mode sine
+Terminal 2:  ./run_ur5_http.sh
+
+Then customize for your needs!

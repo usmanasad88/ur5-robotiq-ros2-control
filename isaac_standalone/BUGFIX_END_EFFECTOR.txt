@@ -1,0 +1,101 @@
+═══════════════════════════════════════════════════════════════════════════════
+                    BUG FIX: End-Effector Link Name Error
+═══════════════════════════════════════════════════════════════════════════════
+
+Date: October 2, 2025
+Issue: Exception - Prim path '/World/UR5/ee_link' is invalid
+Status: ✅ FIXED
+
+═══════════════════════════════════════════════════════════════════════════════
+PROBLEM
+═══════════════════════════════════════════════════════════════════════════════
+
+When running ./run_ur5_http.sh, the following error occurred:
+
+Exception: Prim path expression ['/World/UR5/ee_link'] is invalid, 
+a prim matching the expression needs to created before wrapping it as view
+
+The error happened at line 292 in ur5_http_control.py when creating the 
+SingleManipulator with end_effector_prim_path="/World/UR5/ee_link"
+
+═══════════════════════════════════════════════════════════════════════════════
+ROOT CAUSE
+═══════════════════════════════════════════════════════════════════════════════
+
+The UR5 robot model in Isaac Sim does NOT have a link named "ee_link".
+Isaac Sim's UR5 USD file also doesn't have "tool0" link in the expected location.
+
+The actual end-effector link we must use is "wrist_3_link" - the last physical 
+link in the UR5 kinematic chain.
+
+UR5 Link Hierarchy in Isaac Sim USD:
+/World/UR5/base_link
+/World/UR5/shoulder_link
+/World/UR5/upper_arm_link
+/World/UR5/forearm_link
+/World/UR5/wrist_1_link
+/World/UR5/wrist_2_link
+/World/UR5/wrist_3_link     ← This is the actual end-effector!
+
+Note: tool0 and ee_link may exist in URDF files but are not present in the 
+Isaac Sim USD asset at /Isaac/Robots/UniversalRobots/ur5/ur5.usd
+
+═══════════════════════════════════════════════════════════════════════════════
+SOLUTION
+═══════════════════════════════════════════════════════════════════════════════
+
+Changed line 292 in ur5_http_control.py:
+
+BEFORE:
+    ur5 = my_world.scene.add(
+        SingleManipulator(
+            prim_path="/World/UR5",
+            name="ur5",
+            end_effector_prim_path="/World/UR5/ee_link"  ❌ WRONG
+        )
+    )
+
+ATTEMPT 2 (also failed):
+    end_effector_prim_path="/World/UR5/tool0"  ❌ ALSO DOESN'T EXIST
+
+AFTER (CORRECT):
+    ur5 = my_world.scene.add(
+        SingleManipulator(
+            prim_path="/World/UR5",
+            name="ur5",
+            end_effector_prim_path="/World/UR5/wrist_3_link"    ✅ CORRECT
+        )
+    )
+
+═══════════════════════════════════════════════════════════════════════════════
+VERIFICATION
+═══════════════════════════════════════════════════════════════════════════════
+
+To verify the fix works:
+
+1. Terminal 1: Start Flask server
+   python3 test_flask_server.py --mode static
+
+2. Terminal 2: Start Isaac Sim with HTTP control
+   ./run_ur5_http.sh
+
+Expected: Robot loads successfully, no exceptions
+
+═══════════════════════════════════════════════════════════════════════════════
+NOTES FOR DEVELOPERS
+═══════════════════════════════════════════════════════════════════════════════
+
+• Universal Robots (UR3/UR5/UR10) all use "tool0" as end-effector link
+• This is the standard naming convention in Universal Robots URDF files
+• "ee_link" is sometimes used in custom robots but NOT in UR robots
+• If you get "Prim path ... is invalid" error, check the actual robot structure
+
+To inspect robot links in Isaac Sim:
+1. Load the robot USD file
+2. Open the Stage window (Window → Stage)
+3. Expand the robot hierarchy
+4. Look for link names under the robot prim
+
+═══════════════════════════════════════════════════════════════════════════════
+                                END OF BUG FIX NOTES
+═══════════════════════════════════════════════════════════════════════════════

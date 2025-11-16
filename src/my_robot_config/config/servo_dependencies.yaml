@@ -1,0 +1,11 @@
+# ~/ur_ws/src/my_robot_config/config/servo_dependencies.yaml
+controller_manager:
+  ros__parameters:
+    update_rate: 30
+
+    # These are the controllers that Servo will use
+    joint_trajectory_controller:
+      type: "joint_trajectory_controller/JointTrajectoryController"
+
+    joint_state_broadcaster:
+      type: "joint_state_broadcaster/JointStateBroadcaster"
