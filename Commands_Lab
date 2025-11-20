@@ -55,7 +55,7 @@ colcon build --symlink-install
 source install/setup.bash
 
 # Add to ~/.bashrc for convenience:
-echo "source ~/Repos/ur_ws/install/setup.bash" >> ~/.bashrc
+echo "source ~/ur5-robotiq-ros2-control/install/setup.bash" >> ~/.bashrc
 
 ## 9. Apply RViz fix (prevents crashes with snap-installed apps)
 # Add to ~/.bashrc:
@@ -69,16 +69,24 @@ ros2 pkg list | grep robotiq  # Should show robotiq packages
 # ===== BASIC USAGE COMMANDS =====
 
 # Launch UR5 controller (simulation)
+# NOTE: If running from snap-based VS Code terminal, use ./launch_ur5_nosnap.sh to avoid RViz snap library conflicts
 ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5 robot_ip:=192.168.1.102 use_fake_hardware:=true
 
+# Launch UR5 controller (RECOMMENDED - avoids snap library conflicts)
+./launch_ur5_nosnap.sh 192.168.1.102 true
+
 # Launch MoveIt with RViz
+# NOTE: If running from snap-based VS Code terminal, use ./launch_moveit_nosnap.sh to avoid RViz snap library conflicts
 ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5 launch_rviz:=true
+
+# Launch MoveIt (RECOMMENDED - avoids snap library conflicts)
+./launch_moveit_nosnap.sh ur5 true
 
 # Control real robot (NOT for simulation)
 #ros2 run robotiq_2f_urcap_adapter robotiq_2f_adapter_node.py --ros-args -p robot_ip:=192.168.1.102
 
-# Run general controller with kinematics
-ros2 run ur5_gen_controller random_joint_goal.py --ros-args --params-file /home/mani/Repos/ur_ws/src/Universal_Robots_ROS2_Driver/ur_moveit_config/config/kinematics.yaml
+# Run general controller with kinematics (Note: random_joint_goal is C++ executable, not .py)
+ros2 run ur5_gen_controller random_joint_goal --ros-args --params-file /home/rml/ur_ws/src/Universal_Robots_ROS2_Driver/ur_moveit_config/config/kinematics.yaml
 
 # ===== UR5 + ROBOTIQ 2F-85 GRIPPER INTEGRATION =====
 # Launch UR5 with Robotiq 2F-85 gripper (RECOMMENDED - includes RViz fix)
@@ -159,4 +167,93 @@ ros2 run ur5_vr_teleop vr_teleop_node --ros-args \
 # @app.route('/get_action', methods=['GET'])
 # def get_action():
 #     return jsonify({"joints": {"x": dx, "y": dy, "z": dz, "roll": dr, "pitch": dp, "yaw": dyw}})
+
+# ===== KINESTHETIC TEACHING =====
+# Record and replay robot trajectories through manual guidance
+
+# Launch complete kinesthetic teaching system (recorder + player + visualizer)
+ros2 launch ur5_kinesthetic_teaching kinesthetic_teaching.launch.py
+
+# Launch only trajectory recorder
+ros2 launch ur5_kinesthetic_teaching recorder.launch.py
+
+# Launch only trajectory player
+ros2 launch ur5_kinesthetic_teaching player.launch.py
+
+# Recording Control Services
+# Start recording a new trajectory
+ros2 service call /trajectory_recorder/start_recording std_srvs/srv/Trigger
+
+# Stop recording (auto-saves if configured)
+ros2 service call /trajectory_recorder/stop_recording std_srvs/srv/Trigger
+
+# Manually save current trajectory
+ros2 service call /trajectory_recorder/save_trajectory std_srvs/srv/Trigger
+
+# Clear recorded data without saving
+ros2 service call /trajectory_recorder/clear_trajectory std_srvs/srv/Trigger
+
+# Playback Control Services
+# Load most recent trajectory file
+ros2 service call /trajectory_player/load_trajectory std_srvs/srv/Trigger
+
+# Play the loaded trajectory
+ros2 service call /trajectory_player/play_trajectory std_srvs/srv/Trigger
+
+# Stop current playback
+ros2 service call /trajectory_player/stop_playback std_srvs/srv/Trigger
+
+# List available trajectory files
+ros2 service call /trajectory_player/list_trajectories std_srvs/srv/Trigger
+
+# Visualization Services
+# Load and visualize latest trajectory
+ros2 service call /trajectory_visualizer/load_latest std_srvs/srv/Trigger
+
+# Clear visualization markers
+ros2 service call /trajectory_visualizer/clear_visualization std_srvs/srv/Trigger
+
+# Playback Speed Control
+# Set playback speed to 0.5x (half speed)
+ros2 topic pub /trajectory_player/set_playback_speed std_msgs/Float32 "data: 0.5" --once
+
+# Set playback speed to 2.0x (double speed)
+ros2 topic pub /trajectory_player/set_playback_speed std_msgs/Float32 "data: 2.0" --once
+
+# Custom launch with parameters
+ros2 launch ur5_kinesthetic_teaching kinesthetic_teaching.launch.py \
+  trajectory_dir:=~/my_trajectories \
+  recording_rate:=50.0 \
+  end_effector_frame:=tool0
+
+# Launch with looping playback
+ros2 launch ur5_kinesthetic_teaching player.launch.py \
+  loop_playback:=true \
+  playback_speed:=1.5
+
+# Post-Process Trajectories (Remove Idle Time)
+# Basic usage - removes idle time with default threshold (0.001 rad)
+python3 src/ur5_kinesthetic_teaching/scripts/trajectory_postprocess.py \
+  ~/ur5_trajectories/trajectory_20251119_132731.json
+
+# With verbose output - see detailed motion detection info
+python3 src/ur5_kinesthetic_teaching/scripts/trajectory_postprocess.py \
+  ~/ur5_trajectories/trajectory_20251119_132731.json --verbose
+
+# Custom threshold - more sensitive (detects smaller movements)
+python3 src/ur5_kinesthetic_teaching/scripts/trajectory_postprocess.py \
+  ~/ur5_trajectories/my_trajectory.json --threshold 0.0005
+
+# Custom output file
+python3 src/ur5_kinesthetic_teaching/scripts/trajectory_postprocess.py \
+  ~/ur5_trajectories/raw_trajectory.json \
+  --output ~/ur5_trajectories/clean_trajectory.json
+
+# Batch process all trajectories
+for file in ~/ur5_trajectories/trajectory_*.json; do
+    echo "Processing: $file"
+    python3 src/ur5_kinesthetic_teaching/scripts/trajectory_postprocess.py \
+        "$file" --threshold 0.001
+done
+
 

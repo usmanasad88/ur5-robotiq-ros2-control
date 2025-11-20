@@ -1,0 +1,31 @@
+# UR5 Kinesthetic Teaching Configuration
+
+# Recording parameters
+recording:
+  rate: 30.0  # Hz - frequency of trajectory point recording
+  min_position_change: 0.001  # meters or radians - minimum change to record a point
+  auto_save: true  # automatically save trajectory when stopping recording
+
+# Frames
+frames:
+  base_frame: "base_link"
+  end_effector_frame: "tool0"
+
+# Trajectory storage
+storage:
+  directory: "~/ur5_trajectories"
+  format: "json"
+
+# Playback parameters
+playback:
+  default_speed: 1.0  # speed multiplier (0.1 to 5.0)
+  controller_name: "scaled_joint_trajectory_controller"
+  use_moveit: false  # future feature
+  loop_playback: false
+
+# Visualization
+visualization:
+  update_rate: 1.0  # Hz
+  path_line_width: 0.003  # meters
+  waypoint_size: 0.015  # meters
+  orientation_arrow_length: 0.03  # meters
