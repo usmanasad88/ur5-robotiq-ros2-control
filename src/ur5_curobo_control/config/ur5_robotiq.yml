@@ -1,0 +1,91 @@
+robot_cfg:
+  kinematics:
+    usd_path: null
+    usd_robot_root: "/robot"
+    isaac_usd_path: ""
+    usd_flip_joints: {}
+    usd_flip_joint_limits: []
+
+    urdf_path: "/home/mani/Repos/ur_ws/install/ur5_curobo_control/share/ur5_curobo_control/config/ur5_robotiq.urdf"
+    asset_root_path: "/home/mani/Repos/ur_ws/install/ur5_curobo_control/share/ur5_curobo_control/config"
+    
+    base_link: "base_link"
+    ee_link: "tool0"
+    link_names: null
+    lock_joints: null
+    extra_links: null
+
+    
+    collision_link_names: ['shoulder_link','upper_arm_link', 'forearm_link', 'wrist_1_link', 
+    'wrist_2_link' ,'wrist_3_link', 'tool0', 'robotiq_85_base_link'] 
+    self_collision_ignore:
+      shoulder_link: ['upper_arm_link', 'base_link']
+      upper_arm_link: ['shoulder_link', 'forearm_link']
+      forearm_link: ['upper_arm_link', 'wrist_1_link']
+      wrist_1_link: ['forearm_link', 'wrist_2_link']
+      wrist_2_link: ['wrist_1_link', 'wrist_3_link']
+      wrist_3_link: ['wrist_2_link', 'tool0', 'robotiq_85_base_link']
+      tool0: ['wrist_3_link', 'robotiq_85_base_link']
+      robotiq_85_base_link: ['tool0', 'wrist_3_link']
+    self_collision_buffer: {}
+    collision_spheres:
+      shoulder_link:
+        - "center": [0.0, 0.0, 0.0]
+          "radius": 0.1
+      upper_arm_link:
+        - "center": [-0.416, -0.0, 0.143]
+          "radius": 0.078
+        - "center": [-0.015, 0.0, 0.134]
+          "radius": 0.077
+        - "center": [-0.14, 0.0, 0.138]
+          "radius": 0.062
+        - "center": [-0.285, -0.001, 0.139]
+          "radius": 0.061
+        - "center": [-0.376, 0.001, 0.138]
+          "radius": 0.077
+        - "center": [-0.222, 0.001, 0.139]
+          "radius": 0.061
+        - "center": [-0.055, 0.008, 0.14]
+          "radius": 0.07
+      forearm_link:
+        - "center": [-0.387, -0.0, 0.034]
+          "radius": 0.057
+        - "center": [-0.014, 0.0, 0.026]
+          "radius": 0.058
+        - "center": [-0.135, -0.0, 0.03]
+          "radius": 0.046
+        - "center": [-0.266, -0.0, 0.03]
+          "radius": 0.046
+        - "center": [-0.349, -0.0, 0.033]
+          "radius": 0.057
+        - "center": [-0.209, -0.0, 0.03]
+          "radius": 0.046
+        - "center": [-0.052, 0.008, 0.032]
+          "radius": 0.053
+      wrist_1_link:
+        - "center": [-0.0, -0.015, -0.01]
+          "radius": 0.05
+        - "center": [-0.0, 0.006, -0.012]
+          "radius": 0.051
+        - "center": [-0.0, -0.038, -0.01]
+          "radius": 0.05
+      wrist_2_link:
+        - "center": [0.0, 0.007, -0.013]
+          "radius": 0.048
+        - "center": [0.0, -0.014, -0.011]
+          "radius": 0.047
+        - "center": [0.0, -0.037, -0.011]
+          "radius": 0.047
+      wrist_3_link:
+        - "center": [0.0, 0.005, -0.018]
+          "radius": 0.042
+        - "center": [0.0, -0.014, -0.016]
+          "radius": 0.042
+        - "center": [0.0, -0.035, -0.016]
+          "radius": 0.042
+      tool0:
+        - "center": [0.0, 0.0, 0.0]
+          "radius": 0.04
+      robotiq_85_base_link:
+        - "center": [0.0, 0.0, 0.0]
+          "radius": 0.05
