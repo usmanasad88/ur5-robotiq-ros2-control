@@ -2,6 +2,10 @@
 ros_1_for_reference/
 scripts_for_coding_agent_reference/
 ifra_cranfield/
+finetune_output/
+isaac_standalone/
+generated_dataset/
+wandb/
 
 # ROS 2 build artifacts
 build/

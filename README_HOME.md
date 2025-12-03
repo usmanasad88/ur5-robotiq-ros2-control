@@ -91,12 +91,15 @@ ros2 run ur5_gen_controller random_joint_goal.py --ros-args --params-file /home/
 ros2 launch ur5_robotiq_description ur5_robotiq.launch.py ur_type:=ur5 use_fake_hardware:=true
 
 # Launch with MoveIt (gripper fully integrated with collision checking)
-ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5 \
-  description_package:=ur5_robotiq_description \
-  description_file:=ur5_robotiq.urdf.xacro \
-  moveit_config_package:=ur5_robotiq_description \
-  moveit_config_file:=ur5_robotiq.srdf.xacro \
-  use_fake_hardware:=true
+./launch_ur5_robotiq_moveit.sh
+
+# Or manually (requires environment fix):
+# ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5 \
+#   description_package:=ur5_robotiq_description \
+#   description_file:=ur5_robotiq.urdf.xacro \
+#   moveit_config_package:=ur5_robotiq_description \
+#   moveit_config_file:=ur5_robotiq.srdf.xacro \
+#   use_fake_hardware:=true
 
 # Verify gripper segments are loaded
 ros2 topic echo /robot_description --once | grep robotiq
@@ -113,10 +116,20 @@ source ~/Repos/ur_ws/install/setup.bash
 
 # ===== TELEOPERATION CONTROL =====
 # General controller node (processes teleop commands from all sources)
-ros2 run ur5_gen_controller random_joint_goal --ros-args \
-  -p use_http_server:=false \
-  -p use_random_motion:=false \
-  -p max_iterations:=10000
+# Use the helper script to avoid library conflicts:
+./run_ur5_controller.sh
+
+# Or with custom arguments:
+./run_ur5_controller.sh -p use_http_server:=true -p action_server_url:=http://localhost:5000/get_action
+
+# To control in Base Frame (useful for VR teleop):
+./run_ur5_controller.sh -p control_frame:=base
+
+# Manual command (requires environment fix):
+# ros2 run ur5_gen_controller random_joint_goal --ros-args \
+#   -p use_http_server:=false \
+#   -p use_random_motion:=false \
+#   -p max_iterations:=10000
 
 # With HTTP server enabled (for Python control)
 ros2 run ur5_gen_controller random_joint_goal --ros-args \
@@ -130,21 +143,33 @@ ros2 run ur5_gen_controller random_joint_goal --ros-args \
   -p use_random_motion:=true
 
 # Keyboard teleoperation
-ros2 run ur5_keyboard_teleop keyboard_teleop_node --ros-args \
-  -p linear_step:=0.01 \
-  -p angular_step:=0.05
+# Use the helper script to avoid library conflicts:
+./run_keyboard_teleop.sh
+
+# Manual command (requires environment fix):
+# ros2 run ur5_keyboard_teleop keyboard_teleop_node --ros-args \
+#   -p linear_step:=0.01 \
+#   -p angular_step:=0.05
 
 # SpaceMouse teleoperation
-ros2 run ur5_spacemouse_teleop spacemouse_teleop_node --ros-args \
-  -p scale_translation:=0.001 \
-  -p scale_rotation:=0.005 \
-  -p publish_rate:=10.0
+# Use the helper script to avoid library conflicts:
+./run_spacemouse_teleop.sh
+
+# Manual command (requires environment fix):
+# ros2 run ur5_spacemouse_teleop spacemouse_teleop_node --ros-args \
+#   -p scale_translation:=0.001 \
+#   -p scale_rotation:=0.005 \
+#   -p publish_rate:=10.0
 
 # VR teleoperation (HTC Vive)
-ros2 run ur5_vr_teleop vr_teleop_node --ros-args \
-  -p controller_side:=any \
-  -p scale_translation:=50.0 \
-  -p scale_rotation:=50.0
+# Use the helper script to avoid library conflicts:
+./run_vr_teleop.sh
+
+# Manual command (requires environment fix):
+# ros2 run ur5_vr_teleop vr_teleop_node --ros-args \
+#   -p controller_side:=any \
+#   -p scale_translation:=50.0 \
+#   -p scale_rotation:=50.0
 
 # VR with custom sensitivity
 ros2 run ur5_vr_teleop vr_teleop_node --ros-args \

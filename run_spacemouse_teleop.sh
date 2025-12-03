@@ -1,6 +1,6 @@
 #!/bin/bash
-# Launch script for UR5 + Robotiq that fixes RViz crash issue
-# This removes snap libraries from the path to prevent conflicts
+# Run script for UR5 SpaceMouse Teleop that fixes library path issues
+# This removes snap libraries and conda env from the path to prevent conflicts
 
 # Deactivate conda environment if active to avoid python version conflicts
 if [[ -n "$CONDA_PREFIX" ]]; then
@@ -33,15 +33,19 @@ export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/opt/ros
 cd /home/mani/Repos/ur_ws
 source install/setup.bash
 
-# Launch with provided arguments or defaults
-ROBOT_IP="${1:-192.168.1.102}"
-USE_FAKE="${2:-true}"
+echo "Running UR5 SpaceMouse Teleop..."
 
-echo "Launching UR5 + Robotiq 2F-85..."
-echo "Robot IP: $ROBOT_IP"
-echo "Fake Hardware: $USE_FAKE"
-echo ""
-
-exec ros2 launch ur5_robotiq_description ur5_robotiq.launch.py \
-  robot_ip:=$ROBOT_IP \
-  use_fake_hardware:=$USE_FAKE
+# Default arguments if none provided
+if [ $# -eq 0 ]; then
+    echo "No arguments provided. Using defaults:"
+    echo "  -p scale_translation:=0.001"
+    echo "  -p scale_rotation:=0.005"
+    echo "  -p publish_rate:=10.0"
+    exec ros2 run ur5_spacemouse_teleop spacemouse_teleop_node --ros-args \
+        -p scale_translation:=0.01 \
+        -p scale_rotation:=0.05 \
+        -p publish_rate:=10.0
+else
+    echo "Arguments: $@"
+    exec ros2 run ur5_spacemouse_teleop spacemouse_teleop_node --ros-args "$@"
+fi

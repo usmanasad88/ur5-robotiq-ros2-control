@@ -26,6 +26,7 @@ setup(
         'console_scripts': [
             'curobo_control_node = ur5_curobo_control.curobo_control_node:main',
             'face_safety_monitor = ur5_curobo_control.face_safety_monitor:main',
+            'isaac_follower_node = ur5_curobo_control.isaac_follower_node:main',
         ],
     },
 )

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Launch script for UR5 + Robotiq that fixes RViz crash issue
-# This removes snap libraries from the path to prevent conflicts
+# Launch script for UR5 + Robotiq MoveIt that fixes RViz crash/library issues
+# This removes snap libraries and conda env from the path to prevent conflicts
 
 # Deactivate conda environment if active to avoid python version conflicts
 if [[ -n "$CONDA_PREFIX" ]]; then
@@ -34,14 +34,15 @@ cd /home/mani/Repos/ur_ws
 source install/setup.bash
 
 # Launch with provided arguments or defaults
-ROBOT_IP="${1:-192.168.1.102}"
-USE_FAKE="${2:-true}"
+USE_FAKE="${1:-true}"
 
-echo "Launching UR5 + Robotiq 2F-85..."
-echo "Robot IP: $ROBOT_IP"
+echo "Launching UR5 + Robotiq MoveIt..."
 echo "Fake Hardware: $USE_FAKE"
 echo ""
 
-exec ros2 launch ur5_robotiq_description ur5_robotiq.launch.py \
-  robot_ip:=$ROBOT_IP \
+exec ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5 \
+  description_package:=ur5_robotiq_description \
+  description_file:=ur5_robotiq.urdf.xacro \
+  moveit_config_package:=ur5_robotiq_description \
+  moveit_config_file:=ur5_robotiq.srdf.xacro \
   use_fake_hardware:=$USE_FAKE

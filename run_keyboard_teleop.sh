@@ -1,6 +1,6 @@
 #!/bin/bash
-# Launch script for UR5 + Robotiq that fixes RViz crash issue
-# This removes snap libraries from the path to prevent conflicts
+# Run script for UR5 Keyboard Teleop that fixes library path issues
+# This removes snap libraries and conda env from the path to prevent conflicts
 
 # Deactivate conda environment if active to avoid python version conflicts
 if [[ -n "$CONDA_PREFIX" ]]; then
@@ -33,15 +33,21 @@ export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/opt/ros
 cd /home/mani/Repos/ur_ws
 source install/setup.bash
 
-# Launch with provided arguments or defaults
-ROBOT_IP="${1:-192.168.1.102}"
-USE_FAKE="${2:-true}"
+echo "Running UR5 Keyboard Teleop..."
+echo "Use WASD/QE for translation, IJKL/UO for rotation."
+echo "Press 'm' to toggle between translation and rotation modes."
+echo "Press 'r' to reset pose."
+echo "Press 'q' to quit."
 
-echo "Launching UR5 + Robotiq 2F-85..."
-echo "Robot IP: $ROBOT_IP"
-echo "Fake Hardware: $USE_FAKE"
-echo ""
-
-exec ros2 launch ur5_robotiq_description ur5_robotiq.launch.py \
-  robot_ip:=$ROBOT_IP \
-  use_fake_hardware:=$USE_FAKE
+# Default arguments if none provided
+if [ $# -eq 0 ]; then
+    echo "No arguments provided. Using defaults:"
+    echo "  -p linear_step:=0.01"
+    echo "  -p angular_step:=0.05"
+    exec ros2 run ur5_keyboard_teleop keyboard_teleop_node --ros-args \
+        -p linear_step:=0.01 \
+        -p angular_step:=0.05
+else
+    echo "Arguments: $@"
+    exec ros2 run ur5_keyboard_teleop keyboard_teleop_node --ros-args "$@"
+fi

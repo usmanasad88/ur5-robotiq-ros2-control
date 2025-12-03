@@ -174,6 +174,62 @@ class VRTeleopNode(Node):
             'button_mask': button_mask
         }
 
+    def draw_bar(self, value, max_val=0.1, width=20):
+        """Draw an ASCII bar for visualization."""
+        # Normalize value to -1 to 1 range based on max_val
+        norm_val = max(-1.0, min(1.0, value / max_val))
+        
+        # Calculate position of the marker
+        # 0 is at center (width // 2)
+        center = width // 2
+        pos = int(center + (norm_val * center))
+        pos = max(0, min(width - 1, pos))
+        
+        bar = [' '] * width
+        bar[center] = '|'
+        
+        if pos > center:
+            for i in range(center + 1, pos + 1):
+                bar[i] = '#'
+        elif pos < center:
+            for i in range(pos, center):
+                bar[i] = '#'
+        else:
+            bar[center] = 'O' # Zero position
+            
+        return f"[{''.join(bar)}] {value:+.4f}"
+
+    def get_hmd_orientation_vectors(self):
+        """Get the forward and right vectors of the HMD projected on the floor."""
+        poses = self.vr_system.getDeviceToAbsoluteTrackingPose(
+            openvr.TrackingUniverseStanding, 0,
+            openvr.k_unMaxTrackedDeviceCount
+        )
+        pose = poses[openvr.k_unTrackedDeviceIndex_Hmd]
+        if not pose.bPoseIsValid:
+            return None, None
+            
+        mat = pose.mDeviceToAbsoluteTracking
+        
+        # OpenVR: X=Right, Y=Up, Z=Back
+        # We want vectors in the absolute frame
+        
+        # Right vector is the first column (m00, m10, m20)
+        right = np.array([mat[0][0], 0, mat[2][0]]) # Project to floor (y=0)
+        norm = np.linalg.norm(right)
+        if norm < 1e-6:
+            return None, None
+        right = right / norm
+        
+        # Back vector is the third column (m02, m12, m22)
+        back = np.array([mat[0][2], 0, mat[2][2]]) # Project to floor
+        norm = np.linalg.norm(back)
+        if norm < 1e-6:
+            return None, None
+        back = back / norm
+        
+        return right, back
+
     def timer_callback(self):
         """Read VR controller and publish PoseDelta message."""
         pose = self.get_controller_pose()
@@ -201,36 +257,95 @@ class VRTeleopNode(Node):
         
         # Calculate delta from last pose
         if self.last_pose is not None and self.use_relative_mode:
-            # Calculate position delta
+            # Calculate position delta (Room Frame)
             pos_delta = pose['position'] - self.last_pose['position']
             
-            # Calculate rotation delta
+            # Calculate rotation delta (Room Frame)
             rot_delta = pose['rotation'] - self.last_pose['rotation']
             
-            # Only log every 10th message to reduce spam
-            self.message_count += 1
-            should_log = (self.message_count % 10 == 0)
+            # Transform to HMD frame (Head-Relative)
+            right_vec, back_vec = self.get_hmd_orientation_vectors()
             
-            if should_log:
-                self.get_logger().info(
-                    f'Raw VR delta: pos=({pos_delta[0]:.6f}, {pos_delta[1]:.6f}, {pos_delta[2]:.6f}), '
-                    f'rot=({rot_delta[0]:.6f}, {rot_delta[1]:.6f}, {rot_delta[2]:.6f})'
-                )
-            
+            if right_vec is not None:
+                # Project delta onto user vectors
+                # dx_user is component along Right vector
+                dx_user = np.dot(pos_delta, right_vec)
+                
+                # dy_user is just Y component (Room Up)
+                dy_user = pos_delta[1]
+                
+                # dz_user is component along Back vector
+                # OpenVR Z is Back. Robot Z is Up. Robot X is Forward.
+                # We map:
+                # User Right -> Robot -Y (UR5 Base Frame: Y is Left/Right? No, usually Y is Left)
+                # Let's stick to standard mapping first:
+                # User Right (+X) -> Robot +Y (Left) or -Y (Right)?
+                # User Forward (-Z) -> Robot +X (Forward)
+                # User Up (+Y) -> Robot +Z (Up)
+                
+                # Let's calculate "User Frame" deltas first:
+                # +X = Right, +Y = Up, +Z = Back (towards user)
+                
+                user_right = np.dot(pos_delta, right_vec)
+                user_up = pos_delta[1]
+                user_back = np.dot(pos_delta, back_vec)
+                
+                # Now map to Robot Frame (assuming Robot Base Frame matches User perspective roughly)
+                # Robot: X=Forward, Y=Left, Z=Up
+                # User:  -Back=Forward, -Right=Left, Up=Up
+                
+                # But usually we map:
+                # User Right -> Robot -Y (if Y is Left)
+                # User Forward -> Robot X
+                # User Up -> Robot Z
+                
+                # Let's keep the simple mapping for now and let the user adjust:
+                # dx (Robot X) = -user_back (Forward)
+                # dy (Robot Y) = -user_right (Left)
+                # dz (Robot Z) = user_up (Up)
+                
+                # Wait, the previous code was:
+                # dx = pos_delta[0] (Room Right)
+                # dy = pos_delta[1] (Room Up)
+                # dz = pos_delta[2] (Room Back)
+                
+                # If we want "Readable" messages matching the bars:
+                # X (Right/Left) -> user_right
+                # Y (Up/Down) -> user_up
+                # Z (Back/Fwd) -> user_back
+                
+                dx_mapped = user_right
+                dy_mapped = user_up
+                dz_mapped = user_back
+                
+            else:
+                dx_mapped = pos_delta[0]
+                dy_mapped = pos_delta[1]
+                dz_mapped = pos_delta[2]
+
             # Apply scaling
-            dx = pos_delta[0] * self.scale_translation
-            dy = pos_delta[1] * self.scale_translation
-            dz = pos_delta[2] * self.scale_translation
+            dx = dx_mapped * self.scale_translation
+            dy = dy_mapped * self.scale_translation
+            dz = dz_mapped * self.scale_translation
             
             droll = rot_delta[0] * self.scale_rotation
             dpitch = rot_delta[1] * self.scale_rotation
             dyaw = rot_delta[2] * self.scale_rotation
+
+            # Only log every 5th message to reduce spam
+            self.message_count += 1
+            should_log = (self.message_count % 5 == 0)
             
             if should_log:
-                self.get_logger().info(
-                    f'Scaled delta: pos=({dx:.6f}, {dy:.6f}, {dz:.6f}), '
-                    f'rot=({droll:.6f}, {dpitch:.6f}, {dyaw:.6f})'
-                )
+                vis_max = 0.1 # Adjust this range based on typical delta values
+                self.get_logger().info('\n' + '-'*60)
+                self.get_logger().info(f'X (Right/Left): {self.draw_bar(dx, vis_max)} | Raw: {dx_mapped:+.4f}')
+                self.get_logger().info(f'Y (Up/Down)   : {self.draw_bar(dy, vis_max)} | Raw: {dy_mapped:+.4f}')
+                self.get_logger().info(f'Z (Back/Fwd)  : {self.draw_bar(dz, vis_max)} | Raw: {dz_mapped:+.4f}')
+                self.get_logger().info(f'Roll          : {self.draw_bar(droll, vis_max)} | Raw: {rot_delta[0]:+.4f}')
+                self.get_logger().info(f'Pitch         : {self.draw_bar(dpitch, vis_max)} | Raw: {rot_delta[1]:+.4f}')
+                self.get_logger().info(f'Yaw           : {self.draw_bar(dyaw, vis_max)} | Raw: {rot_delta[2]:+.4f}')
+                self.get_logger().info('-'*60)
             
             # Only publish if there's meaningful motion
             if (abs(dx) > 0.0001 or abs(dy) > 0.0001 or abs(dz) > 0.0001 or
@@ -245,18 +360,9 @@ class VRTeleopNode(Node):
                 msg.dyaw = float(dyaw)
                 
                 self.publisher_.publish(msg)
-                
-                if should_log:
-                    self.get_logger().info(
-                        f'✓ PUBLISHED: dx={dx:.6f}, dy={dy:.6f}, dz={dz:.6f}, '
-                        f'dr={droll:.6f}, dp={dpitch:.6f}, dyw={dyaw:.6f}'
-                    )
             else:
                 if should_log:
-                    self.get_logger().warn(
-                        f'✗ FILTERED (below threshold): dx={dx:.6f}, dy={dy:.6f}, dz={dz:.6f}, '
-                        f'dr={droll:.6f}, dp={dpitch:.6f}, dyw={dyaw:.6f}'
-                    )
+                    self.get_logger().info("Motion below threshold (Filtered)")
         
         # Update last pose
         self.last_pose = pose

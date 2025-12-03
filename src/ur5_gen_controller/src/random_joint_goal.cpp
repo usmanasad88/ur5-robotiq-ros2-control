@@ -237,6 +237,8 @@ int main(int argc, char **argv)
     node->declare_parameter<bool>("use_random_motion", false);
   const int max_iterations =
     node->declare_parameter<int>("max_iterations", 1000);
+  const std::string control_frame =
+    node->declare_parameter<std::string>("control_frame", "tool"); // "tool" or "base"
 
   move_group.setMaxVelocityScalingFactor(0.2);
   move_group.setMaxAccelerationScalingFactor(0.2);
@@ -257,11 +259,12 @@ int main(int argc, char **argv)
   RCLCPP_INFO(node->get_logger(), "Configuration:");
   RCLCPP_INFO(node->get_logger(), "  - Use HTTP Server: %s", use_http_server ? "YES" : "NO");
   RCLCPP_INFO(node->get_logger(), "  - Use Random Motion: %s", use_random_motion ? "YES" : "NO");
-  RCLCPP_INFO(node->get_logger(), "  - Use Topic Subscription: YES (always active)");
+    RCLCPP_INFO(node->get_logger(), "  - Use Topic Subscription: YES (always active)");
   RCLCPP_INFO(node->get_logger(), "  - Max Iterations: %d", max_iterations);
+  RCLCPP_INFO(node->get_logger(), "  - Control Frame: %s", control_frame.c_str());
 
   rclcpp::Rate rate(10.0);  // 10Hz loop rate for responsive teleoperation
-
+  
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<double> position_delta(-0.02, 0.02);
@@ -347,23 +350,40 @@ int main(int argc, char **argv)
     tf2::Quaternion current_quat;
     tf2::fromMsg(current_pose_stamped.pose.orientation, current_quat);
 
-    // Transform translational deltas from local (end-effector) frame to planning frame
-    tf2::Vector3 local_delta(dx, dy, dz);
-    tf2::Vector3 global_delta = tf2::quatRotate(current_quat, local_delta);
-
-    target_pose.position.x += global_delta.x();
-    target_pose.position.y += global_delta.y();
-    target_pose.position.z += global_delta.z();
-
     tf2::Quaternion delta_quat;
     delta_quat.setRPY(droll, dpitch, dyaw);
-    tf2::Quaternion target_quat = current_quat * delta_quat; // Apply rotation in local frame
+    tf2::Quaternion target_quat;
+
+    if (control_frame == "base")
+    {
+      // Apply translation in base frame (global axes)
+      target_pose.position.x += dx;
+      target_pose.position.y += dy;
+      target_pose.position.z += dz;
+
+      // Apply rotation in base frame (pre-multiply)
+      target_quat = delta_quat * current_quat;
+    }
+    else // "tool" or default
+    {
+      // Transform translational deltas from local (end-effector) frame to planning frame
+      tf2::Vector3 local_delta(dx, dy, dz);
+      tf2::Vector3 global_delta = tf2::quatRotate(current_quat, local_delta);
+
+      target_pose.position.x += global_delta.x();
+      target_pose.position.y += global_delta.y();
+      target_pose.position.z += global_delta.z();
+
+      // Apply rotation in local frame (post-multiply)
+      target_quat = current_quat * delta_quat;
+    }
+
     target_quat.normalize();
     target_pose.orientation = tf2::toMsg(target_quat);
 
     RCLCPP_DEBUG(node->get_logger(),
-                "Iteration %d (%s): Δpos = (%.3f, %.3f, %.3f) m, Δrpy = (%.3f, %.3f, %.3f) rad",
-                iteration, source.c_str(),
+                "Iteration %d (%s) [%s frame]: Δpos = (%.3f, %.3f, %.3f) m, Δrpy = (%.3f, %.3f, %.3f) rad",
+                iteration, source.c_str(), control_frame.c_str(),
                 dx, dy, dz, droll, dpitch, dyaw);
 
     RCLCPP_DEBUG(node->get_logger(), "Target Pose:  pos(%.3f, %.3f, %.3f), quat(%.3f, %.3f, %.3f, %.3f)",

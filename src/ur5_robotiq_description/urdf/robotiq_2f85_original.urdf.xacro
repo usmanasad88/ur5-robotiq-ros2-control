@@ -79,8 +79,8 @@ Licensed under Apache-2.0
       <inertial>
         <mass value="0.018491" />
         <origin xyz="0.0 0.0 0.0" />
-        <inertia ixx="0.000009" ixy="0.000000" ixz="0.000000"
-                 iyx="0.000000" iyy="0.000009" iyz="0.000000"
+        <inertia ixx="0.000009" ixy="-0.000001" ixz="0.000000"
+                 iyx="-0.000001" iyy="0.000001" iyz="0.000000"
                  izx="0.000000" izy="0.000000" izz="0.000010" />
       </inertial>
     </link>
@@ -108,8 +108,8 @@ Licensed under Apache-2.0
       <inertial>
         <mass value="0.018491" />
         <origin xyz="0.0 0.0 0.0" />
-        <inertia ixx="0.000009" ixy="0.000000" ixz="0.000000"
-                 iyx="0.000000" iyy="0.000009" iyz="0.000000"
+        <inertia ixx="0.000009" ixy="-0.000001" ixz="0.000000"
+                 iyx="-0.000001" iyy="0.000001" iyz="0.000000"
                  izx="0.000000" izy="0.000000" izz="0.000010" />
       </inertial>
     </link>

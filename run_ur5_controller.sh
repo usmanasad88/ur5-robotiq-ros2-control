@@ -1,6 +1,6 @@
 #!/bin/bash
-# Launch script for UR5 + Robotiq that fixes RViz crash issue
-# This removes snap libraries from the path to prevent conflicts
+# Run script for UR5 controller that fixes library path issues
+# This removes snap libraries and conda env from the path to prevent conflicts
 
 # Deactivate conda environment if active to avoid python version conflicts
 if [[ -n "$CONDA_PREFIX" ]]; then
@@ -33,15 +33,18 @@ export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/opt/ros
 cd /home/mani/Repos/ur_ws
 source install/setup.bash
 
-# Launch with provided arguments or defaults
-ROBOT_IP="${1:-192.168.1.102}"
-USE_FAKE="${2:-true}"
-
-echo "Launching UR5 + Robotiq 2F-85..."
-echo "Robot IP: $ROBOT_IP"
-echo "Fake Hardware: $USE_FAKE"
-echo ""
-
-exec ros2 launch ur5_robotiq_description ur5_robotiq.launch.py \
-  robot_ip:=$ROBOT_IP \
-  use_fake_hardware:=$USE_FAKE
+echo "Running UR5 General Controller..."
+# Default arguments if none provided
+if [ $# -eq 0 ]; then
+    echo "No arguments provided. Using defaults:"
+    echo "  -p use_http_server:=false"
+    echo "  -p use_random_motion:=false"
+    echo "  -p max_iterations:=10000"
+    exec ros2 run ur5_gen_controller random_joint_goal --ros-args \
+        -p use_http_server:=false \
+        -p use_random_motion:=false \
+        -p max_iterations:=10000
+else
+    echo "Arguments: $@"
+    exec ros2 run ur5_gen_controller random_joint_goal --ros-args "$@"
+fi
