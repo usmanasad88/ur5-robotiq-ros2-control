@@ -610,7 +610,8 @@ class UR5ProgramExecutorNode(Node):
             self.pause_execution(True)
             self.stop_robot()
         elif not self.safety_triggered and prev_state:
-            self.get_logger().info("SAFETY CLEARED: Ready to resume.")
+            self.get_logger().info("SAFETY CLEARED: Resuming execution.")
+            self.pause_execution(False)
     
     def execute_program_callback(self, request, response):
         """Service callback to execute a loaded program."""
