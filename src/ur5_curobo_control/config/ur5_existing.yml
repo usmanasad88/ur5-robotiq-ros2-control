@@ -17,8 +17,8 @@ robot_cfg:
     usd_flip_joints: {}
     usd_flip_joint_limits: []
 
-    urdf_path: "/home/mani/Repos/ur_ws/install/ur5_curobo_control/share/ur5_curobo_control/config/ur5.urdf"
-    asset_root_path: "/home/mani/Repos/ur_ws/install/ur5_curobo_control/share/ur5_curobo_control/config"
+    urdf_path: "/home/rml/ur5-robotiq-ros2-control/install/ur5_curobo_control/share/ur5_curobo_control/config/ur5.urdf"
+    asset_root_path: "/home/rml/ur5-robotiq-ros2-control/install/ur5_curobo_control/share/ur5_curobo_control/config"
     
     base_link: "base_link"
     ee_link: "tool0"

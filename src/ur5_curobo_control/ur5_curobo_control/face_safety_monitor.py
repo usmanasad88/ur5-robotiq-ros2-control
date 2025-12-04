@@ -1,4 +1,4 @@
-#!/home/mani/miniconda3/envs/ur5_python/bin/python
+#!/home/rml/miniconda3/envs/ur5_python/bin/python
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool
@@ -24,7 +24,7 @@ class FaceSafetyMonitor(Node):
         self.declare_parameter('threshold_area', 0.15) # Fraction of screen area
         self.declare_parameter('model_type', 'yolov8n.pt') # Standard YOLOv8 model
         self.declare_parameter('use_realsense', False) # Use Intel RealSense if available
-        self.declare_parameter('depth_threshold', 1.0) # Safety distance in meters
+        self.declare_parameter('depth_threshold', 2.7) # Safety distance in meters
         
         self.camera_id = self.get_parameter('camera_id').value
         self.threshold_area = self.get_parameter('threshold_area').value
@@ -156,10 +156,10 @@ class FaceSafetyMonitor(Node):
 
         # Determine safety status
         if self.use_realsense:
-            # Trigger if ANY person is closer than threshold
-            if min_distance < self.depth_threshold:
+            # Trigger if ANY person is FURTHER than threshold (or not detected)
+            if min_distance > self.depth_threshold:
                 should_stop = True
-                self.get_logger().info(f"Depth Safety: Min Dist {min_distance:.2f}m < {self.depth_threshold}m")
+                self.get_logger().info(f"Depth Safety: Min Dist {min_distance:.2f}m > {self.depth_threshold}m")
         else:
             # Trigger if area ratio exceeds threshold
             if max_area_ratio > self.threshold_area:

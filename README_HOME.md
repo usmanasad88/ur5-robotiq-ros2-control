@@ -69,7 +69,7 @@ ros2 pkg list | grep robotiq  # Should show robotiq packages
 # ===== BASIC USAGE COMMANDS =====
 
 # Launch UR5 controller (simulation)
-ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5 robot_ip:=192.168.1.102 use_fake_hardware:=true
+ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5 robot_ip:=172.17.66.105 use_fake_hardware:=true
 
 # Launch MoveIt with RViz
 ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5 launch_rviz:=true
@@ -85,7 +85,7 @@ ros2 run ur5_gen_controller random_joint_goal.py --ros-args --params-file /home/
 ./launch_ur5_robotiq.sh
 
 # With real robot (replace IP as needed)
-./launch_ur5_robotiq.sh 192.168.1.102 false
+./launch_ur5_robotiq.sh 172.17.66.105 false
 
 # Direct launch (requires RViz fix in bashrc - see RVIZ_FIX.md)
 ros2 launch ur5_robotiq_description ur5_robotiq.launch.py ur_type:=ur5 use_fake_hardware:=true
@@ -208,7 +208,7 @@ ros2 run ur5_workspace_description workspace_collision_objects
 
 # ===== COMPLETE SETUP WITH WORKSPACE =====
 # Terminal 1: Launch robot with fake hardware
-ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5 robot_ip:=192.168.1.102 use_fake_hardware:=true
+ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5 robot_ip:=172.17.66.105 use_fake_hardware:=true
 
 # Terminal 2: Launch MoveIt with RViz
 ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5 launch_rviz:=true
@@ -222,7 +222,7 @@ ros2 launch ur5_workspace_description workspace_environment.launch.py
 
 # ===== WORKSPACE WITH REAL ROBOT =====
 # Terminal 1: Launch real robot
-ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5 robot_ip:=192.168.1.102 use_fake_hardware:=false
+ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5 robot_ip:=172.17.66.105 use_fake_hardware:=false
 
 # Terminal 2: Launch MoveIt
 ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5 launch_rviz:=true
@@ -235,7 +235,7 @@ ros2 launch ur5_workspace_description workspace_environment.launch.py
 # It requires a specific Conda environment and environment variables.
 
 # 1. Launch the UR5 driver (simulation)
-ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5 robot_ip:=192.168.1.102 use_fake_hardware:=true
+ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5 robot_ip:=172.17.66.105 use_fake_hardware:=true
 
 # 2. Launch the Curobo control node (in a separate terminal)
 # This script handles the environment setup (LD_PRELOAD) and python interpreter patching.

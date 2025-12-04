@@ -1,4 +1,4 @@
-#!/home/mani/miniconda3/envs/ur5_python/bin/python
+#!/home/rml/miniconda3/envs/ur5_python/bin/python
 """
 Isaac Sim Follower Node
 Subscribes to /isaac_joint_commands and mirrors those positions to the real robot

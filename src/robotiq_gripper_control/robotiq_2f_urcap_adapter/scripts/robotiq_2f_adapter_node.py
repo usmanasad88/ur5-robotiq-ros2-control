@@ -48,7 +48,10 @@ class Robotiq2fAdapterNode(Node):
 
         # The threshold position for inactive status
         self.inactive_position_threshold = 0.082
-        self.timer = self.create_timer(0.1, self.publish_gripper_status)
+        # Track last status to only publish on changes
+        self._last_published_status = None
+        # Use slower timer (0.5s) to reduce socket traffic
+        self.timer = self.create_timer(0.5, self.publish_gripper_status)
 
         self._action_server = ActionServer(
             self,
@@ -206,22 +209,39 @@ class Robotiq2fAdapterNode(Node):
         self._normalized_speed_baseline = min_gripper_speed_m_s
     
     def publish_gripper_status(self):
-        """Publish the gripper's status based on its position."""
-        gripper_position_m = self.__m_value_from_normalized_grip_width(self.gripper_adapter.position)
+        """Publish the gripper's status based on its position. Only publishes on state change."""
+        try:
+            gripper_position_m = self.__m_value_from_normalized_grip_width(self.gripper_adapter.position)
+        except ValueError as e:
+            # Gripper may return '?' if not activated - log warning but don't crash
+            # Only log once when entering unknown state
+            if self._last_published_status != "unknown":
+                self.get_logger().warn(f"Could not read gripper position: {e}")
+                status_msg = String()
+                status_msg.data = "unknown"
+                self.gripper_status_publisher.publish(status_msg)
+                self._last_published_status = "unknown"
+            return
+        except Exception as e:
+            # Catch any other socket errors gracefully
+            if self._last_published_status != "error":
+                self.get_logger().error(f"Gripper communication error: {e}")
+                self._last_published_status = "error"
+            return
 
-        # Check if the gripper position is less than 0.82 (active) or greater/equal to 0.82 (inactive)
-        status_msg = String()
+        # Check if the gripper position is less than threshold (active) or greater/equal (inactive)
         if gripper_position_m < self.inactive_position_threshold:
-            status_msg.data = "active"
+            current_status = "active"
         else:
-            status_msg.data = "inactive"
+            current_status = "inactive"
 
-        # Publish the status message
-        self.gripper_status_publisher.publish(status_msg)
-        self.get_logger().info(f"Published gripper status: {status_msg.data}")
-        # Publish the status message
-        self.gripper_status_publisher.publish(status_msg)
-        self.get_logger().info(f"Published gripper status: {status_msg.data}")
+        # Only publish and log when status changes
+        if current_status != self._last_published_status:
+            status_msg = String()
+            status_msg.data = current_status
+            self.gripper_status_publisher.publish(status_msg)
+            self.get_logger().info(f"Gripper status changed: {current_status}")
+            self._last_published_status = current_status
 
     def __newton_value_from_normalized_effort(self, normalized_value: int) -> float:
         """

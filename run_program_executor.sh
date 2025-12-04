@@ -22,10 +22,10 @@ cd "$SCRIPT_DIR"
 EXECUTOR_SCRIPT="install/ur5_curobo_control/lib/ur5_curobo_control/program_executor_node"
 GESTURE_SCRIPT="install/ur5_curobo_control/lib/ur5_curobo_control/gesture_safety_monitor"
 if [ -f "$EXECUTOR_SCRIPT" ]; then
-    sed -i '1s|^.*$|#!/home/mani/miniconda3/envs/ur5_python/bin/python|' "$EXECUTOR_SCRIPT"
+    sed -i '1s|^.*$|#!/home/rml/miniconda3/envs/ur5_python/bin/python|' "$EXECUTOR_SCRIPT"
 fi
 if [ -f "$GESTURE_SCRIPT" ]; then
-    sed -i '1s|^.*$|#!/home/mani/miniconda3/envs/ur5_python/bin/python|' "$GESTURE_SCRIPT"
+    sed -i '1s|^.*$|#!/home/rml/miniconda3/envs/ur5_python/bin/python|' "$GESTURE_SCRIPT"
 fi
 
 # 2. Export LD_PRELOAD to prevent GLIBCXX errors when using PyTorch/Curobo with ROS 2

@@ -11,7 +11,7 @@ SAVED_TERM=$TERM
 SAVED_DISPLAY=$DISPLAY
 
 # Get parameters
-ROBOT_IP=${1:-192.168.1.102}
+ROBOT_IP=${1:-172.17.66.105}
 USE_FAKE_HARDWARE=${2:-true}
 
 # Create a clean environment script

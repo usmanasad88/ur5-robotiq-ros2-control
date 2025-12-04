@@ -1,4 +1,4 @@
-#!/home/mani/miniconda3/envs/ur5_python/bin/python
+#!/home/rml/miniconda3/envs/ur5_python/bin/python
 """
 Simple Gripper Command Adapter
 

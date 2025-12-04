@@ -30,11 +30,12 @@ unset LD_LIBRARY_PATH
 export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/opt/ros/humble/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib"
 
 # Now source ROS2 (this will append workspace paths)
-cd /home/mani/Repos/ur_ws
+cd /home/rml/ur5-robotiq-ros2-control
+source /opt/ros/humble/setup.bash
 source install/setup.bash
 
 # Launch with provided arguments or defaults
-ROBOT_IP="${1:-192.168.1.102}"
+ROBOT_IP="${1:-172.17.66.105}"
 USE_FAKE="${2:-true}"
 
 echo "Launching UR5 + Robotiq 2F-85..."

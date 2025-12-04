@@ -1,6 +1,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.conditions import UnlessCondition
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -16,6 +17,7 @@ def generate_launch_description():
     auto_execute = LaunchConfiguration('auto_execute')
     use_fake_hardware = LaunchConfiguration('use_fake_hardware')
     presenter_control = LaunchConfiguration('presenter_control')
+    robot_ip = LaunchConfiguration('robot_ip')
     
     declare_robot_config = DeclareLaunchArgument(
         'robot_config_file',
@@ -43,8 +45,14 @@ def generate_launch_description():
     
     declare_default_speed = DeclareLaunchArgument(
         'default_speed',
-        default_value='0.5',
+        default_value='0.3',
         description='Default speed factor (0.0-1.0)'
+    )
+    
+    declare_robot_ip = DeclareLaunchArgument(
+        'robot_ip',
+        default_value='172.17.66.105',
+        description='Robot IP address for gripper communication'
     )
     
     declare_trajectory_dt = DeclareLaunchArgument(
@@ -71,6 +79,18 @@ def generate_launch_description():
         description='Enable Logitech presenter control (Next=start/restart, Prev=pause)'
     )
     
+    # Robotiq gripper adapter - only launched when NOT using fake hardware
+    robotiq_adapter_node = Node(
+        package='robotiq_2f_urcap_adapter',
+        executable='robotiq_2f_adapter_node.py',
+        name='robotiq_2f_urcap_adapter',
+        output='screen',
+        parameters=[{
+            'robot_ip': robot_ip,
+        }],
+        condition=UnlessCondition(use_fake_hardware)
+    )
+    
     program_executor_node = Node(
         package='ur5_curobo_control',
         executable='program_executor_node',
@@ -95,9 +115,11 @@ def generate_launch_description():
         declare_programs_dir,
         declare_program_file,
         declare_default_speed,
+        declare_robot_ip,
         declare_trajectory_dt,
         declare_auto_execute,
         declare_use_fake_hardware,
         declare_presenter_control,
+        robotiq_adapter_node,
         program_executor_node
     ])

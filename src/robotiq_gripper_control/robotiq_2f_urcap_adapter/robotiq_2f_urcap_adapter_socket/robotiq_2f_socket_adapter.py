@@ -181,6 +181,13 @@ class Robotiq2fSocketAdapter:
                 f"Unexpected response {data} ({data.decode(self.ENCODING)}): "
                 f"does not match '{variable}'"
                 )
+        # Handle '?' response which means gripper is not ready
+        if value_str == '?':
+            raise ValueError(
+                f"Gripper returned '?' for variable '{variable}'. "
+                "This usually means the gripper is not activated on the teach pendant. "
+                "Please go to Installation > URCaps > Robotiq Gripper and activate it."
+            )
         value = int(value_str)
         return value
 
@@ -196,15 +203,19 @@ class Robotiq2fSocketAdapter:
 
     def _reset(self):
         """Reset the gripper."""
-        self.set_gripper_variable(self.ACT, 0)
-        self.set_gripper_variable(self.ATR, 0)
-        while (
-            self.get_gripper_variable(self.ACT) != 0 or
-            self.get_gripper_variable(self.STA) != 0
-        ):
+        try:
             self.set_gripper_variable(self.ACT, 0)
             self.set_gripper_variable(self.ATR, 0)
-        time.sleep(0.5)
+            while (
+                self.get_gripper_variable(self.ACT) != 0 or
+                self.get_gripper_variable(self.STA) != 0
+            ):
+                self.set_gripper_variable(self.ACT, 0)
+                self.set_gripper_variable(self.ATR, 0)
+            time.sleep(0.5)
+        except ValueError:
+            # Gripper may return '?' if not activated - skip reset
+            pass
 
     def activate(self, auto_calibrate: bool = True):
         """

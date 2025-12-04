@@ -1,4 +1,4 @@
-#!/home/mani/miniconda3/envs/ur5_python/bin/python
+#!/home/rml/miniconda3/envs/ur5_python/bin/python
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
@@ -13,7 +13,7 @@ import os
 import sys
 
 # Add curobo to path if not installed
-sys.path.append('/home/mani/isaac-sim-standalone-5.0.0-linux-x86_64/curobo/src')
+sys.path.append('/home/rml/Repos/curobo/src')
 
 from curobo.geom.types import WorldConfig, Cuboid
 from curobo.types.base import TensorDeviceType
