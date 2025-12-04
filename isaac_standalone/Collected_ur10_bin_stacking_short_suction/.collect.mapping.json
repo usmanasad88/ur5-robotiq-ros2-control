@@ -1,0 +1,59 @@
+{
+    "version": "1.0",
+    "file_records": [
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Props/Dolly/Materials/Textures/fof_map_shelf_cart_a_base_d.png",
+            "source_hash": "9890d2c30ad2677c7db3ff96c72abb047ebb72cb",
+            "target_url": "./Props/Dolly/Materials/Textures/fof_map_shelf_cart_a_base_d.png",
+            "target_hash": "3a1c53705706c3233cefa2267abe4d52d0ebbca4"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Props/Dolly/Materials/Textures/fof_map_shelf_cart_a_base_n.png",
+            "source_hash": "b67c37df9473c5eed174e6d1b6b925b4da81acee",
+            "target_url": "./Props/Dolly/Materials/Textures/fof_map_shelf_cart_a_base_n.png",
+            "target_hash": "facb72ff931a1866878de95d018aab009d9dd79d"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Props/Dolly/Materials/Textures/fof_map_shelf_cart_a_base_roughness.png",
+            "source_hash": "a56bd4a306033444b89fc111431ca8e83f97bdbc",
+            "target_url": "./Props/Dolly/Materials/Textures/fof_map_shelf_cart_a_base_roughness.png",
+            "target_hash": "2bf95557e23af6090d84e710d8f3773df170c0ab"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Props/Pallet/Materials/Textures/FOF_Map_Palette_A_D.tga",
+            "source_hash": "493aee2195b4e0e0039348b3c863a6c7c68e142d",
+            "target_url": "./Props/Pallet/Materials/Textures/FOF_Map_Palette_A_D.tga",
+            "target_hash": "0f0075edf2e6728a70596a04586cef218fd09094"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Props/Pallet/Materials/Textures/FOF_Map_Palette_A_N.tga",
+            "source_hash": "2a3e7e2007ee831211bc3c8a1c68c7ab386a81a5",
+            "target_url": "./Props/Pallet/Materials/Textures/FOF_Map_Palette_A_N.tga",
+            "target_hash": "0f0075edf2e6728a70596a04586cef218fd09094"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Props/Sortbot_Housing/Materials/Textures/SortBot_DefaultMaterial_Glossiness.png",
+            "source_hash": "c70f16209e077a0ee89a035ffbfc0a662224aa30",
+            "target_url": "./Props/Sortbot_Housing/Materials/Textures/SortBot_DefaultMaterial_Glossiness.png",
+            "target_hash": "19ad24ab31347f82425f1e8747094275eb0a789e"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Props/Sortbot_Housing/Materials/Textures/SortBot_DefaultMaterial_Diffuse.png",
+            "source_hash": "7900adf834bca00fbbf3aa54edb7cd6e08069e9b",
+            "target_url": "./Props/Sortbot_Housing/Materials/Textures/SortBot_DefaultMaterial_Diffuse.png",
+            "target_hash": "2c3a15b6ed1a2023071d7eee9cda688259b37d50"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Props/Sortbot_Housing/Materials/Textures/SortBot_DefaultMaterial_Emissive_Red.png",
+            "source_hash": "d471d289cf680999b85a6c49cb233ee205cb1aae",
+            "target_url": "./Props/Sortbot_Housing/Materials/Textures/SortBot_DefaultMaterial_Emissive_Red.png",
+            "target_hash": "070f7d6bb0adb225b230ceb7fa0338242852926b"
+        },
+        {
+            "source_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Robots/UniversalRobots/ur10/grippers/long_gripper.usd",
+            "source_hash": "28165d12d4eb452374be4e1c9a11cad6546784ff",
+            "target_url": "./Robots/UniversalRobots/ur10/grippers/long_gripper.usd",
+            "target_hash": "2137f6f44fc39f6d8b5ec35ecc8d16fa6fb32e67"
+        }
+    ]
+}
