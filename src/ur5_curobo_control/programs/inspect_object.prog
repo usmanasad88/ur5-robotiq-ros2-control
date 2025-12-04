@@ -1,0 +1,33 @@
+# ============================================
+# Inspect Object - Robot Program
+# ============================================
+# Moves to multiple positions around an object
+# to allow camera inspection from different angles.
+# Object assumed to be at [0.4, 0.3, 0.1]
+# ============================================
+
+set_speed(0.3)  # Slow for precise inspection
+
+# Start at home
+movetopose([0.4, 0.0, 0.5], [0.0, 1.0, 0.0, 0.0])
+wait(0.5)
+
+# Position 1: Top-down view
+movetopose([0.4, 0.3, 0.35], [0.0, 1.0, 0.0, 0.0])
+wait(2.0)  # Hold for camera capture
+
+# Position 2: Angled view from left
+movetopose([0.3, 0.3, 0.3], [0.1, 0.9, 0.4, 0.1])
+wait(2.0)
+
+# Position 3: Angled view from right
+movetopose([0.5, 0.3, 0.3], [-0.1, 0.9, 0.4, -0.1])
+wait(2.0)
+
+# Position 4: Front view
+movetopose([0.4, 0.15, 0.25], [0.0, 0.707, 0.707, 0.0])
+wait(2.0)
+
+# Return to home
+movetopose([0.4, 0.0, 0.5], [0.0, 1.0, 0.0, 0.0])
+wait(0.5)

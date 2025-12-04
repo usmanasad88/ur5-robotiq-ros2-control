@@ -1,0 +1,79 @@
+# ============================================
+# Pick and Place Object - Robot Program
+# ============================================
+# This program demonstrates a basic pick and place operation.
+# The robot moves to pick up an object from one location
+# and places it at another location.
+#
+# Coordinate frame: base_link (robot base)
+# Quaternion format: [w, x, y, z]
+# ============================================
+
+# Set a moderate speed for safe operation
+set_speed(0.5)
+
+# -----------------------------------------
+# Phase 1: Move to Home Position
+# -----------------------------------------
+# Start from a safe home position above the workspace
+movetopose([0.4, 0.0, 0.5], [0.0, 1.0, 0.0, 0.0])  # Tool pointing down
+wait(1.0)
+
+# Ensure gripper is open before approaching object
+opengripper
+wait(0.5)
+
+# -----------------------------------------
+# Phase 2: Approach Pick Location
+# -----------------------------------------
+# Move to position above the object (pre-grasp)
+movetopose([0.4, 0.3, 0.35], [0.0, 0.707, 0.707, 0.0])  # Angled approach
+wait(0.5)
+
+# Lower to grasp position
+movetopose([0.4, 0.3, 0.15], [0.0, 0.707, 0.707, 0.0])
+wait(0.3)
+
+# -----------------------------------------
+# Phase 3: Grasp Object
+# -----------------------------------------
+closegripper
+wait(1.0)  # Wait for gripper to fully close
+
+# -----------------------------------------
+# Phase 4: Lift Object
+# -----------------------------------------
+# Lift the object up
+movetopose([0.4, 0.3, 0.4], [0.0, 0.707, 0.707, 0.0])
+wait(0.5)
+
+# -----------------------------------------
+# Phase 5: Move to Place Location
+# -----------------------------------------
+# Move horizontally to the place position (opposite side)
+movetopose([0.4, -0.3, 0.4], [0.0, 0.707, 0.707, 0.0])
+wait(0.5)
+
+# Lower to place position
+movetopose([0.4, -0.3, 0.15], [0.0, 0.707, 0.707, 0.0])
+wait(0.3)
+
+# -----------------------------------------
+# Phase 6: Release Object
+# -----------------------------------------
+opengripper
+wait(1.0)  # Wait for gripper to fully open
+
+# -----------------------------------------
+# Phase 7: Retreat and Return Home
+# -----------------------------------------
+# Lift away from placed object
+movetopose([0.4, -0.3, 0.4], [0.0, 0.707, 0.707, 0.0])
+wait(0.5)
+
+# Return to home position
+movetopose([0.4, 0.0, 0.5], [0.0, 1.0, 0.0, 0.0])
+wait(0.5)
+
+# Program complete!
+# The robot is now back at the home position, ready for the next task.

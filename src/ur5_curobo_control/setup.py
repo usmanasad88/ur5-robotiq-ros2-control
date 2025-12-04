@@ -14,6 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'config'), glob('config/*')),
+        (os.path.join('share', package_name, 'programs'), glob('programs/*.prog')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -27,6 +28,9 @@ setup(
             'curobo_control_node = ur5_curobo_control.curobo_control_node:main',
             'face_safety_monitor = ur5_curobo_control.face_safety_monitor:main',
             'isaac_follower_node = ur5_curobo_control.isaac_follower_node:main',
+            'program_executor_node = ur5_curobo_control.program_executor_node:main',
+            'program_cli = ur5_curobo_control.program_cli:main',
+            'gripper_adapter = ur5_curobo_control.gripper_adapter:main',
         ],
     },
 )

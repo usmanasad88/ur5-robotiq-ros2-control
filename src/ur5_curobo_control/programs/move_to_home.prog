@@ -1,0 +1,19 @@
+# ============================================
+# Move to Home Position - Robot Program
+# ============================================
+# Safely moves the robot to a neutral home position
+# above the workspace, ready for the next task.
+# ============================================
+
+# Use moderate speed for safety
+set_speed(0.5)
+
+# Home position - centered above workspace, tool pointing down
+movetopose([0.4, 0.0, 0.5], [0.0, 1.0, 0.0, 0.0])
+wait(0.5)
+
+# Ensure gripper is open
+opengripper
+wait(0.3)
+
+# Robot is now at home position
