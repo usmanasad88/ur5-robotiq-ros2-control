@@ -1,0 +1,151 @@
+
+======================================================================
+Command: ffmpeg -y -i raw_samples/GS010013.36P -vf v360=eac:equirect -q:v 2 output_attempts/output_A_direct.jpg
+Timestamp: 2025-12-12 02:21:31.470431
+Return Code: 1
+
+STDOUT:
+
+
+STDERR:
+ffmpeg version 4.2.2 Copyright (c) 2000-2019 the FFmpeg developers
+  built with gcc 7.3.0 (crosstool-NG 1.23.0.449-a04d0)
+  configuration: --prefix=/home/mani/miniconda3/envs/ur5_python --cc=/tmp/build/80754af9/ffmpeg_1587154242452/_build_env/bin/x86_64-conda_cos6-linux-gnu-cc --disable-doc --enable-avresample --enable-gmp --enable-hardcoded-tables --enable-libfreetype --enable-libvpx --enable-pthreads --enable-libopus --enable-postproc --enable-pic --enable-pthreads --enable-shared --enable-static --enable-version3 --enable-zlib --enable-libmp3lame --disable-nonfree --enable-gpl --enable-gnutls --disable-openssl --enable-libopenh264 --enable-libx264
+  libavutil      56. 31.100 / 56. 31.100
+  libavcodec     58. 54.100 / 58. 54.100
+  libavformat    58. 29.100 / 58. 29.100
+  libavdevice    58.  8.100 / 58.  8.100
+  libavfilter     7. 57.100 /  7. 57.100
+  libavresample   4.  0.  0 /  4.  0.  0
+  libswscale      5.  5.100 /  5.  5.100
+  libswresample   3.  5.100 /  3.  5.100
+  libpostproc    55.  5.100 / 55.  5.100
+[jpeg_pipe @ 0x5726bc3366c0] Format jpeg_pipe detected only with low score of 25, misdetection possible!
+[jpeg_pipe @ 0x5726bc3366c0] Stream #0: not enough frames to estimate rate; consider increasing probesize
+Input #0, jpeg_pipe, from 'raw_samples/GS010013.36P':
+  Duration: N/A, bitrate: N/A
+    Stream #0:0: Video: mjpeg (Baseline), yuvj422p(pc, bt470bg/unknown/unknown), 7680x3840, 25 tbr, 25 tbn, 25 tbc
+Stream mapping:
+  Stream #0:0 -> #0:0 (mjpeg (native) -> mjpeg (native))
+Press [q] to stop, [?] for help
+[AVFilterGraph @ 0x5726bc37d780] No such filter: 'v360'
+Error reinitializing filters!
+Failed to inject frame into filter network: Invalid argument
+Error while processing the decoded data for stream #0:0
+Conversion failed!
+
+
+======================================================================
+Command: ffmpeg -y -i output_attempts/test_B_input.jpg -vf v360=eac:equirect -q:v 2 output_attempts/output_B_copied.jpg
+Timestamp: 2025-12-12 02:21:31.615478
+Return Code: 1
+
+STDOUT:
+
+
+STDERR:
+ffmpeg version 4.2.2 Copyright (c) 2000-2019 the FFmpeg developers
+  built with gcc 7.3.0 (crosstool-NG 1.23.0.449-a04d0)
+  configuration: --prefix=/home/mani/miniconda3/envs/ur5_python --cc=/tmp/build/80754af9/ffmpeg_1587154242452/_build_env/bin/x86_64-conda_cos6-linux-gnu-cc --disable-doc --enable-avresample --enable-gmp --enable-hardcoded-tables --enable-libfreetype --enable-libvpx --enable-pthreads --enable-libopus --enable-postproc --enable-pic --enable-pthreads --enable-shared --enable-static --enable-version3 --enable-zlib --enable-libmp3lame --disable-nonfree --enable-gpl --enable-gnutls --disable-openssl --enable-libopenh264 --enable-libx264
+  libavutil      56. 31.100 / 56. 31.100
+  libavcodec     58. 54.100 / 58. 54.100
+  libavformat    58. 29.100 / 58. 29.100
+  libavdevice    58.  8.100 / 58.  8.100
+  libavfilter     7. 57.100 /  7. 57.100
+  libavresample   4.  0.  0 /  4.  0.  0
+  libswscale      5.  5.100 /  5.  5.100
+  libswresample   3.  5.100 /  3.  5.100
+  libpostproc    55.  5.100 / 55.  5.100
+Input #0, image2, from 'output_attempts/test_B_input.jpg':
+  Duration: 00:00:00.04, start: 0.000000, bitrate: 1026741 kb/s
+    Stream #0:0: Video: mjpeg (Baseline), yuvj422p(pc, bt470bg/unknown/unknown), 7680x3840, 25 tbr, 25 tbn, 25 tbc
+Stream mapping:
+  Stream #0:0 -> #0:0 (mjpeg (native) -> mjpeg (native))
+Press [q] to stop, [?] for help
+[AVFilterGraph @ 0x55b7c146ac00] No such filter: 'v360'
+Error reinitializing filters!
+Failed to inject frame into filter network: Invalid argument
+Error while processing the decoded data for stream #0:0
+Conversion failed!
+
+
+======================================================================
+Command: convert raw_samples/GS010013.36P output_attempts/output_D_imagemagick.jpg
+Timestamp: 2025-12-12 02:21:31.968439
+Return Code: 0
+
+STDOUT:
+
+
+STDERR:
+
+
+======================================================================
+Command: ffmpeg -y -i output_attempts/output_D_imagemagick.jpg -vf v360=eac:equirect -q:v 2 output_attempts/output_D_stitched.jpg
+Timestamp: 2025-12-12 02:21:32.101766
+Return Code: 1
+
+STDOUT:
+
+
+STDERR:
+ffmpeg version 4.2.2 Copyright (c) 2000-2019 the FFmpeg developers
+  built with gcc 7.3.0 (crosstool-NG 1.23.0.449-a04d0)
+  configuration: --prefix=/home/mani/miniconda3/envs/ur5_python --cc=/tmp/build/80754af9/ffmpeg_1587154242452/_build_env/bin/x86_64-conda_cos6-linux-gnu-cc --disable-doc --enable-avresample --enable-gmp --enable-hardcoded-tables --enable-libfreetype --enable-libvpx --enable-pthreads --enable-libopus --enable-postproc --enable-pic --enable-pthreads --enable-shared --enable-static --enable-version3 --enable-zlib --enable-libmp3lame --disable-nonfree --enable-gpl --enable-gnutls --disable-openssl --enable-libopenh264 --enable-libx264
+  libavutil      56. 31.100 / 56. 31.100
+  libavcodec     58. 54.100 / 58. 54.100
+  libavformat    58. 29.100 / 58. 29.100
+  libavdevice    58.  8.100 / 58.  8.100
+  libavfilter     7. 57.100 /  7. 57.100
+  libavresample   4.  0.  0 /  4.  0.  0
+  libswscale      5.  5.100 /  5.  5.100
+  libswresample   3.  5.100 /  3.  5.100
+  libpostproc    55.  5.100 / 55.  5.100
+Input #0, image2, from 'output_attempts/output_D_imagemagick.jpg':
+  Duration: 00:00:00.04, start: 0.000000, bitrate: 1056167 kb/s
+    Stream #0:0: Video: mjpeg (Baseline), yuvj422p(pc, bt470bg/unknown/unknown), 7680x3840 [SAR 72:72 DAR 2:1], 25 tbr, 25 tbn, 25 tbc
+Stream mapping:
+  Stream #0:0 -> #0:0 (mjpeg (native) -> mjpeg (native))
+Press [q] to stop, [?] for help
+[AVFilterGraph @ 0x6438063d3a40] No such filter: 'v360'
+Error reinitializing filters!
+Failed to inject frame into filter network: Invalid argument
+Error while processing the decoded data for stream #0:0
+Conversion failed!
+
+
+======================================================================
+Command: ffmpeg -y -i output_attempts/output_E_extracted.jpg -vf v360=eac:equirect -q:v 2 output_attempts/output_E_stitched.jpg
+Timestamp: 2025-12-12 02:21:32.116197
+Return Code: 1
+
+STDOUT:
+
+
+STDERR:
+ffmpeg version 4.2.2 Copyright (c) 2000-2019 the FFmpeg developers
+  built with gcc 7.3.0 (crosstool-NG 1.23.0.449-a04d0)
+  configuration: --prefix=/home/mani/miniconda3/envs/ur5_python --cc=/tmp/build/80754af9/ffmpeg_1587154242452/_build_env/bin/x86_64-conda_cos6-linux-gnu-cc --disable-doc --enable-avresample --enable-gmp --enable-hardcoded-tables --enable-libfreetype --enable-libvpx --enable-pthreads --enable-libopus --enable-postproc --enable-pic --enable-pthreads --enable-shared --enable-static --enable-version3 --enable-zlib --enable-libmp3lame --disable-nonfree --enable-gpl --enable-gnutls --disable-openssl --enable-libopenh264 --enable-libx264
+  libavutil      56. 31.100 / 56. 31.100
+  libavcodec     58. 54.100 / 58. 54.100
+  libavformat    58. 29.100 / 58. 29.100
+  libavdevice    58.  8.100 / 58.  8.100
+  libavfilter     7. 57.100 /  7. 57.100
+  libavresample   4.  0.  0 /  4.  0.  0
+  libswscale      5.  5.100 /  5.  5.100
+  libswresample   3.  5.100 /  3.  5.100
+  libpostproc    55.  5.100 / 55.  5.100
+[mjpeg @ 0x62baa36f2680] unable to decode APP fields: Invalid data found when processing input
+Input #0, image2, from 'output_attempts/output_E_extracted.jpg':
+  Duration: 00:00:00.04, start: 0.000000, bitrate: 12151 kb/s
+    Stream #0:0: Video: mjpeg (Baseline), yuvj422p(pc, bt470bg/unknown/unknown), 240x120, 25 tbr, 25 tbn, 25 tbc
+Stream mapping:
+  Stream #0:0 -> #0:0 (mjpeg (native) -> mjpeg (native))
+Press [q] to stop, [?] for help
+[mjpeg @ 0x62baa36f3d40] unable to decode APP fields: Invalid data found when processing input
+[AVFilterGraph @ 0x62baa37003c0] No such filter: 'v360'
+Error reinitializing filters!
+Failed to inject frame into filter network: Invalid argument
+Error while processing the decoded data for stream #0:0
+Conversion failed!
+

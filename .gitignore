@@ -6,6 +6,9 @@ finetune_output/
 generated_dataset/
 wandb/
 
+# Large asset files (3D models, scenes, point clouds)
+assets/
+
 # ROS 2 build artifacts
 build/
 install/

@@ -1,0 +1,20 @@
+   MainThread:02:06:27.399 util.py                                   217 DEBUG    | Send cmd --> nmcli general permissions |grep enable-disable-wifi
+   MainThread:02:06:27.434 util.py                                   223 DEBUG    | Receive response --> org.freedesktop.NetworkManager.enable-disable-wifi                yes   
+
+   MainThread:02:06:27.434 util.py                                   217 DEBUG    | Send cmd --> nmcli general permissions |grep scan
+   MainThread:02:06:27.464 util.py                                   223 DEBUG    | Receive response --> org.freedesktop.NetworkManager.wifi.scan                          yes   
+
+   MainThread:02:06:27.464 util.py                                   217 DEBUG    | Send cmd --> nmcli --version
+   MainThread:02:06:27.468 util.py                                   223 DEBUG    | Receive response --> nmcli tool, version 1.36.6
+
+   MainThread:02:06:27.469 util.py                                   217 DEBUG    | Send cmd -->  nmcli dev
+   MainThread:02:06:27.479 util.py                                   223 DEBUG    | Receive response --> DEVICE           TYPE      STATE                   CONNECTION         
+enp5s0           ethernet  connected               Wired connection 1 
+enx04574796c048  ethernet  connected               Wired connection 2 
+br-0dfd6d26c001  bridge    connected (externally)  br-0dfd6d26c001    
+br-be7f71808d8e  bridge    connected (externally)  br-be7f71808d8e    
+docker0          bridge    connected (externally)  docker0            
+lo               loopback  unmanaged               --                 
+
+   MainThread:02:06:27.479 gopro_wireless.py                         154 ERROR    | Could not find a suitable Wifi Interface. If there is an available Wifi interface, try passing it manually with the 'wifi_interface' argument.
+   MainThread:02:06:27.483 photo.py                                   51 ERROR    | InterfaceConfigFailure("\nCan't auto-assign Wifi interface because no suitable interface was found.\nIs there an available Wifi interface on this computer? To verify this, try:\n    - MacOS: networksetup -listallhardwareports\n    - Linux: nmcli dev\n    - Windows: netsh wlan show interfaces")
