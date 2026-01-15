@@ -50,8 +50,17 @@ done
 
 # 1. Patch the shebang in the installed node script to use the Conda environment
 #    This is necessary because 'colcon build' resets it to the system python.
-sed -i '1s|^.*$|#!/home/rml/miniconda3/envs/ur5_python/bin/python|' install/ur5_curobo_control/lib/ur5_curobo_control/curobo_control_node
-sed -i '1s|^.*$|#!/home/mani/miniconda3/envs/ur5_python/bin/python|' install/ur5_curobo_control/lib/ur5_curobo_control/gesture_safety_monitor 2>/dev/null
+#    Dynamically find the python path from the current conda environment or fallback to 'python'
+if [ -f "$HOME/miniconda3/envs/ur5_python/bin/python" ]; then
+    PYTHON_EXE="$HOME/miniconda3/envs/ur5_python/bin/python"
+elif [ -f "$HOME/anaconda3/envs/ur5_python/bin/python" ]; then
+    PYTHON_EXE="$HOME/anaconda3/envs/ur5_python/bin/python"
+else
+    PYTHON_EXE=$(which python)
+fi
+
+sed -i "1s|^.*$|#!$PYTHON_EXE|" install/ur5_curobo_control/lib/ur5_curobo_control/curobo_control_node
+sed -i "1s|^.*$|#!$PYTHON_EXE|" install/ur5_curobo_control/lib/ur5_curobo_control/gesture_safety_monitor 2>/dev/null
 
 # 2. Export LD_PRELOAD to prevent GLIBCXX errors when using PyTorch/Curobo with ROS 2
 export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6

@@ -1,10 +1,11 @@
-#!/home/rml/miniconda3/envs/ur5_python/bin/python
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from geometry_msgs.msg import Pose, Quaternion
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
+from ament_index_python.packages import get_package_share_directory
 
 import torch
 import numpy as np
@@ -12,8 +13,23 @@ import time
 import os
 import sys
 
-# Add curobo to path if not installed
-sys.path.append('/home/rml/Repos/curobo/src')
+# Try to import curobo, if fails, try adding common paths
+try:
+    import curobo
+except ImportError:
+    # Add curobo to path if not installed
+    # Check for common locations or environment variables
+    possible_paths = [
+        '/home/rml/Repos/curobo/src',
+        '/home/mani/Repos/curobo/src',
+        os.path.join(os.path.expanduser('~'), 'Repos/curobo/src'),
+        # Add Isaac Sim curobo path if available
+        '/home/mani/isaac-sim-standalone-5.0.0-linux-x86_64/curobo/src'
+    ]
+    for path in possible_paths:
+        if os.path.exists(path):
+            sys.path.append(path)
+            break
 
 from curobo.geom.types import WorldConfig, Cuboid
 from curobo.types.base import TensorDeviceType
@@ -44,9 +60,29 @@ class CuroboControlNode(Node):
         # Initialize Curobo
         self.tensor_args = TensorDeviceType()
         
+        # Load YAML manually to fix paths dynamically
+        robot_cfg_dict = load_yaml(robot_config_file)
+        
+        # Fix URDF path
+        if 'robot_cfg' in robot_cfg_dict:
+            kinematics = robot_cfg_dict['robot_cfg'].get('kinematics', {})
+            if 'urdf_path' in kinematics:
+                # Construct correct path dynamically
+                try:
+                    pkg_share = get_package_share_directory('ur5_curobo_control')
+                    correct_urdf_path = os.path.join(pkg_share, 'config', 'ur5.urdf')
+                    
+                    # Update if different
+                    current_path = kinematics['urdf_path']
+                    if current_path != correct_urdf_path:
+                        self.get_logger().warn(f"Updating URDF path from {current_path} to {correct_urdf_path}")
+                        kinematics['urdf_path'] = correct_urdf_path
+                except Exception as e:
+                    self.get_logger().error(f"Failed to resolve URDF path dynamically: {e}")
+        
         self.dt = 0.05 # Increased from 0.01 to reduce speed
         self.motion_gen_config = MotionGenConfig.load_from_robot_config(
-            robot_config_file,
+            robot_cfg_dict,
             world_config_file,
             self.tensor_args,
             trajopt_tsteps=32,
@@ -69,6 +105,21 @@ class CuroboControlNode(Node):
             10
         )
 
+        # Command Subscriber
+        self.cmd_sub = self.create_subscription(
+            Pose,
+            '/curobo/cmd_pose',
+            self.cmd_pose_callback,
+            10
+        )
+        
+        # Status Publisher
+        self.status_pub = self.create_publisher(
+            String,
+            '/curobo/status',
+            10
+        )
+
         # Safety Subscriber
         self.safety_triggered = False
         self.safety_sub = self.create_subscription(
@@ -84,18 +135,8 @@ class CuroboControlNode(Node):
             'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint'
         ]
         
-        # Define a sequence of target poses (position x,y,z, quaternion w,x,y,z)
-        # These are in base_link frame
-        # Note: UR5 reach is about 0.85m.
-        self.target_poses = [
-            ([0.4, 0.3, 0.4], [0.0, 0.707, 0.707, 0.0]), 
-            ([0.4, -0.3, 0.4], [0.0, 0.707, 0.707, 0.0]),
-            ([0.5, 0.0, 0.5], [0.0, 1.0, 0.0, 0.0]),
-        ]
-        self.current_target_idx = 0
-        
-        # Timer to execute sequence
-        self.timer = self.create_timer(5.0, self.execute_next_move)
+        # Timer to execute sequence (REMOVED for external control)
+        # self.timer = self.create_timer(5.0, self.execute_next_move)
         
     def safety_callback(self, msg):
         prev_state = self.safety_triggered
@@ -140,24 +181,26 @@ class CuroboControlNode(Node):
         except ValueError:
             pass
 
-    def execute_next_move(self):
+    def cmd_pose_callback(self, msg: Pose):
         if self.safety_triggered:
             self.get_logger().warn("Skipping move: Safety trigger is active.")
+            self.status_pub.publish(String(data="FAILED: Safety Triggered"))
             return
 
         if self.current_joint_state is None:
             self.get_logger().warn("Waiting for joint states...")
+            self.status_pub.publish(String(data="FAILED: No Joint States"))
             return
             
-        # Cycle through targets
-        if self.current_target_idx >= len(self.target_poses):
-            self.current_target_idx = 0
-
-        target_pos, target_quat = self.target_poses[self.current_target_idx]
-        self.get_logger().info(f"Planning to target {self.current_target_idx}: {target_pos}")
+        self.get_logger().info(f"Received target pose: {msg.position}")
+        self.status_pub.publish(String(data="MOVING"))
         
         # Create Curobo Pose
         # Curobo expects quaternion as [w, x, y, z]
+        # ROS msg is [x, y, z, w]
+        target_pos = [msg.position.x, msg.position.y, msg.position.z]
+        target_quat = [msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z]
+        
         target_pose = CuroboPose(
             position=torch.tensor(target_pos, device=self.tensor_args.device, dtype=self.tensor_args.dtype),
             quaternion=torch.tensor(target_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
@@ -173,11 +216,10 @@ class CuroboControlNode(Node):
             self.get_logger().info("Plan successful! Executing...")
             traj = result.interpolated_plan # [1, steps, dof]
             self.publish_trajectory(traj)
-            self.current_target_idx += 1
+            self.status_pub.publish(String(data="SUCCEEDED"))
         else:
             self.get_logger().error(f"Planning failed! Status: {result.status}")
-            self.get_logger().info(f"Start state: {start_state.position}")
-            self.get_logger().info(f"Target pose: {target_pose.position}")
+            self.status_pub.publish(String(data="FAILED: Planning Error"))
 
     def publish_trajectory(self, traj_input):
         # Convert tensor to JointTrajectory message
