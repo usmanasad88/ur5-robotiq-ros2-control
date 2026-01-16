@@ -5,6 +5,7 @@ ifra_cranfield/
 finetune_output/
 generated_dataset/
 wandb/
+recordings/
 
 # Large asset files (3D models, scenes, point clouds)
 assets/
