@@ -43,11 +43,15 @@ from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose as CuroboPose
 from curobo.types.robot import JointState as CuroboJointState
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
+from curobo.util_file import load_yaml
 
 # Import the program parser
 from ur5_curobo_control.program_parser import (
     ProgramParser, RobotInstruction, InstructionType
 )
+
+# ROS 2 imports for path resolution
+from ament_index_python.packages import get_package_share_directory
 
 
 class ExecutorState(Enum):
@@ -87,6 +91,12 @@ class UR5ProgramExecutorNode(Node):
         self.declare_parameter('presenter_control', True,
             ParameterDescriptor(description='Enable Logitech presenter control'))
         
+        # Parameters for direct pose commands (set via UI)
+        self.declare_parameter('target_pose_position', [0.0, 0.0, 0.0],
+            ParameterDescriptor(description='Target pose position [x, y, z]'))
+        self.declare_parameter('target_pose_quaternion', [1.0, 0.0, 0.0, 0.0],
+            ParameterDescriptor(description='Target pose quaternion [w, x, y, z]'))
+        
         robot_config_file = self.get_parameter('robot_config_file').value
         self.use_fake_hardware = self.get_parameter('use_fake_hardware').value
         world_config_file = self.get_parameter('world_config_file').value
@@ -114,8 +124,33 @@ class UR5ProgramExecutorNode(Node):
         self.tensor_args = TensorDeviceType()
         
         try:
+            # Load YAML manually to fix paths dynamically (portable for different users/workspaces)
+            robot_cfg_dict = load_yaml(robot_config_file)
+            
+            # Fix URDF path to be workspace-relative
+            if 'robot_cfg' in robot_cfg_dict:
+                kinematics = robot_cfg_dict['robot_cfg'].get('kinematics', {})
+                if 'urdf_path' in kinematics:
+                    try:
+                        pkg_share = get_package_share_directory('ur5_curobo_control')
+                        correct_urdf_path = os.path.join(pkg_share, 'config', 'ur5.urdf')
+                        
+                        current_path = kinematics['urdf_path']
+                        if current_path != correct_urdf_path:
+                            self.get_logger().warn(f"Updating URDF path from {current_path} to {correct_urdf_path}")
+                            kinematics['urdf_path'] = correct_urdf_path
+                            
+                        # Also fix asset_root_path if present
+                        if 'asset_root_path' in kinematics:
+                            correct_asset_path = os.path.join(pkg_share, 'config')
+                            if kinematics['asset_root_path'] != correct_asset_path:
+                                self.get_logger().warn(f"Updating asset_root_path to {correct_asset_path}")
+                                kinematics['asset_root_path'] = correct_asset_path
+                    except Exception as e:
+                        self.get_logger().error(f"Failed to resolve URDF path dynamically: {e}")
+            
             self.motion_gen_config = MotionGenConfig.load_from_robot_config(
-                robot_config_file,
+                robot_cfg_dict,  # Pass the modified dict instead of file path
                 world_config_file,
                 self.tensor_args,
                 trajopt_tsteps=32,
@@ -581,6 +616,14 @@ class UR5ProgramExecutorNode(Node):
             self.list_programs_callback,
             callback_group=self.callback_group
         )
+        
+        # Service to move to a pose directly (reads target_pose_* parameters)
+        self.move_to_pose_srv = self.create_service(
+            Trigger,
+            '~/move_to_pose',
+            self.move_to_pose_callback,
+            callback_group=self.callback_group
+        )
     
     def joint_state_callback(self, msg: JointState):
         """Handle incoming joint states."""
@@ -714,6 +757,68 @@ class UR5ProgramExecutorNode(Node):
         except Exception as e:
             response.success = False
             response.message = f"Error listing programs: {e}"
+        
+        return response
+    
+    def move_to_pose_callback(self, request, response):
+        """Service callback to move to a Cartesian pose directly.
+        
+        Reads target_pose_position and target_pose_quaternion parameters
+        and uses cuRobo to plan and execute motion.
+        """
+        if self.state == ExecutorState.EXECUTING:
+            response.success = False
+            response.message = "Cannot move: program is executing"
+            return response
+        
+        if self.current_joint_state is None:
+            response.success = False
+            response.message = "Cannot move: no joint state received"
+            return response
+        
+        # Get target pose from parameters
+        target_pos = self.get_parameter('target_pose_position').value
+        target_quat = self.get_parameter('target_pose_quaternion').value
+        
+        if len(target_pos) != 3 or len(target_quat) != 4:
+            response.success = False
+            response.message = f"Invalid pose: position={target_pos}, quaternion={target_quat}"
+            return response
+        
+        self.get_logger().info(f"Moving to pose: pos={target_pos}, quat={target_quat}")
+        
+        try:
+            # Create cuRobo Pose (expects quaternion as [w, x, y, z])
+            target_pose = CuroboPose(
+                position=torch.tensor(target_pos, device=self.tensor_args.device, dtype=self.tensor_args.dtype),
+                quaternion=torch.tensor(target_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
+            )
+            
+            # Create Start State
+            start_state = CuroboJointState.from_position(self.current_joint_state.view(1, -1))
+            
+            # Plan motion
+            result = self.motion_gen.plan_single(
+                start_state, target_pose,
+                MotionGenPlanConfig(enable_graph=False, timeout=5.0)
+            )
+            
+            if result.success.item():
+                traj = result.get_interpolated_plan()
+                self.publish_trajectory(traj)
+                duration = self.estimate_trajectory_duration(traj)
+                response.success = True
+                response.message = f"Moving to pose (duration: {duration:.1f}s)"
+                self.get_logger().info(f"Motion planned successfully, executing trajectory")
+            else:
+                response.success = False
+                response.message = f"Motion planning failed: {result.status}"
+                self.get_logger().error(f"Motion planning failed: {result.status}")
+                
+        except Exception as e:
+            response.success = False
+            response.message = f"Error planning motion: {e}"
+            self.get_logger().error(f"Error planning motion: {e}")
         
         return response
     
@@ -941,7 +1046,7 @@ class UR5ProgramExecutorNode(Node):
         return steps * effective_dt
     
     def stop_robot(self):
-        """Stop robot by sending current position as target."""
+        """Stop robot by sending current position as target with safe deceleration."""
         if self.current_joint_state is None:
             return
         
@@ -951,8 +1056,9 @@ class UR5ProgramExecutorNode(Node):
         point = JointTrajectoryPoint()
         point.positions = self.current_joint_state.cpu().numpy().tolist()
         point.velocities = [0.0] * 6
-        point.time_from_start.sec = 0
-        point.time_from_start.nanosec = 500000000
+        # Use 2 seconds for safe stop motion (was 0.5 seconds which is dangerously fast)
+        point.time_from_start.sec = 2
+        point.time_from_start.nanosec = 0
         
         traj_msg.points.append(point)
         self.traj_pub.publish(traj_msg)

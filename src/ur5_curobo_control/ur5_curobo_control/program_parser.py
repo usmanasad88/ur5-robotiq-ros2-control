@@ -274,6 +274,181 @@ def validate_program(filepath: str) -> Tuple[bool, List[str]]:
         return False, [f"Error reading file: {e}"]
 
 
+class PositionType(Enum):
+    """Type of named position."""
+    POSE = auto()   # Cartesian pose (x, y, z, qw, qx, qy, qz)
+    JOINT = auto()  # Joint position (j1, j2, j3, j4, j5, j6)
+
+
+@dataclass
+class NamedPosition:
+    """Represents a named robot position."""
+    name: str
+    position_type: PositionType
+    # For POSE type: [x, y, z]
+    position: Optional[List[float]] = None
+    # For POSE type: [qw, qx, qy, qz]
+    quaternion: Optional[List[float]] = None
+    # For JOINT type: [j1, j2, j3, j4, j5, j6]
+    joint_positions: Optional[List[float]] = None
+    # Optional description/comment
+    description: Optional[str] = None
+
+
+class NamedPositionsParser:
+    """
+    Parses named positions configuration files.
+    
+    File format:
+        # Comments start with #
+        pose <name> <x> <y> <z> <qw> <qx> <qy> <qz>
+        joint <name> <j1> <j2> <j3> <j4> <j5> <j6>
+    
+    Example:
+        pose Beaker 0.4 0.2 0.3 0.0 1.0 0.0 0.0
+        joint Home 0.0 -1.57 1.57 -1.57 -1.57 0.0
+    """
+    
+    # Regex patterns
+    POSE_PATTERN = re.compile(
+        r'^pose\s+(\S+)\s+'                    # pose <name>
+        r'([-+]?\d*\.?\d+)\s+'                 # x
+        r'([-+]?\d*\.?\d+)\s+'                 # y
+        r'([-+]?\d*\.?\d+)\s+'                 # z
+        r'([-+]?\d*\.?\d+)\s+'                 # qw
+        r'([-+]?\d*\.?\d+)\s+'                 # qx
+        r'([-+]?\d*\.?\d+)\s+'                 # qy
+        r'([-+]?\d*\.?\d+)',                   # qz
+        re.IGNORECASE
+    )
+    
+    JOINT_PATTERN = re.compile(
+        r'^joint\s+(\S+)\s+'                   # joint <name>
+        r'([-+]?\d*\.?\d+)\s+'                 # j1
+        r'([-+]?\d*\.?\d+)\s+'                 # j2
+        r'([-+]?\d*\.?\d+)\s+'                 # j3
+        r'([-+]?\d*\.?\d+)\s+'                 # j4
+        r'([-+]?\d*\.?\d+)\s+'                 # j5
+        r'([-+]?\d*\.?\d+)',                   # j6
+        re.IGNORECASE
+    )
+    
+    COMMENT_PATTERN = re.compile(r'^\s*#(.*)$')
+    
+    def __init__(self):
+        self.positions: List[NamedPosition] = []
+        self.errors: List[str] = []
+    
+    def parse_file(self, filepath: str) -> List[NamedPosition]:
+        """Parse a named positions file and return list of positions."""
+        self.positions = []
+        self.errors = []
+        
+        try:
+            with open(filepath, 'r') as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            self.errors.append(f"File not found: {filepath}")
+            return []
+        except Exception as e:
+            self.errors.append(f"Error reading file: {e}")
+            return []
+        
+        current_comment = None
+        
+        for line_num, line in enumerate(lines, start=1):
+            line = line.strip()
+            
+            # Skip empty lines
+            if not line:
+                current_comment = None
+                continue
+            
+            # Check for comment
+            comment_match = self.COMMENT_PATTERN.match(line)
+            if comment_match:
+                current_comment = comment_match.group(1).strip()
+                continue
+            
+            # Try to parse as pose
+            pose_match = self.POSE_PATTERN.match(line)
+            if pose_match:
+                try:
+                    name = pose_match.group(1)
+                    position = [
+                        float(pose_match.group(2)),
+                        float(pose_match.group(3)),
+                        float(pose_match.group(4))
+                    ]
+                    quaternion = [
+                        float(pose_match.group(5)),
+                        float(pose_match.group(6)),
+                        float(pose_match.group(7)),
+                        float(pose_match.group(8))
+                    ]
+                    self.positions.append(NamedPosition(
+                        name=name,
+                        position_type=PositionType.POSE,
+                        position=position,
+                        quaternion=quaternion,
+                        description=current_comment
+                    ))
+                    current_comment = None
+                except ValueError as e:
+                    self.errors.append(f"Line {line_num}: Failed to parse pose values: {e}")
+                continue
+            
+            # Try to parse as joint
+            joint_match = self.JOINT_PATTERN.match(line)
+            if joint_match:
+                try:
+                    name = joint_match.group(1)
+                    joints = [
+                        float(joint_match.group(2)),
+                        float(joint_match.group(3)),
+                        float(joint_match.group(4)),
+                        float(joint_match.group(5)),
+                        float(joint_match.group(6)),
+                        float(joint_match.group(7))
+                    ]
+                    self.positions.append(NamedPosition(
+                        name=name,
+                        position_type=PositionType.JOINT,
+                        joint_positions=joints,
+                        description=current_comment
+                    ))
+                    current_comment = None
+                except ValueError as e:
+                    self.errors.append(f"Line {line_num}: Failed to parse joint values: {e}")
+                continue
+            
+            # Unknown line format (not empty, not comment, not pose, not joint)
+            # Just skip it silently unless it looks like an attempt at a command
+            if line.lower().startswith(('pose', 'joint')):
+                self.errors.append(f"Line {line_num}: Malformed position entry: {line}")
+        
+        return self.positions
+    
+    def get_errors(self) -> List[str]:
+        """Return any parsing errors."""
+        return self.errors
+    
+    def get_poses(self) -> List[NamedPosition]:
+        """Return only pose-type positions."""
+        return [p for p in self.positions if p.position_type == PositionType.POSE]
+    
+    def get_joints(self) -> List[NamedPosition]:
+        """Return only joint-type positions."""
+        return [p for p in self.positions if p.position_type == PositionType.JOINT]
+    
+    def get_by_name(self, name: str) -> Optional[NamedPosition]:
+        """Get a position by name (case-insensitive)."""
+        for p in self.positions:
+            if p.name.lower() == name.lower():
+                return p
+        return None
+
+
 if __name__ == '__main__':
     # Test the parser
     test_program = """

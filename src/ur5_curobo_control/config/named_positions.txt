@@ -1,0 +1,63 @@
+# Named Positions Configuration for UR5
+# 
+# Format:
+#   pose <name> <x> <y> <z> <qw> <qx> <qy> <qz>
+#   joint <name> <j1> <j2> <j3> <j4> <j5> <j6>
+#
+# Poses use Cartesian coordinates (meters) and quaternion orientation (w, x, y, z)
+# Joints use radians
+#
+# Examples:
+#   pose Beaker 0.4 0.2 0.3 0.0 1.0 0.0 0.0
+#   joint Home 0.0 -1.57 1.57 -1.57 -1.57 0.0
+
+# ============================================
+# Home and Safe Positions
+# ============================================
+joint Home 0.0 -1.5708 1.5708 -1.5708 -1.5708 0.0
+joint Upright 0.0 -1.5708 0.0 -1.5708 -1.5708 0.0
+joint Stowed 0.0 -2.35 2.09 -2.88 -1.57 0.0
+
+# ============================================
+# Common Workspace Poses (Cartesian)
+# ============================================
+# Above table center - good neutral position
+pose TableCenter 0.4 0.0 0.4 0.0 1.0 0.0 0.0
+
+# Above table - left side
+pose TableLeft 0.4 0.3 0.4 0.0 1.0 0.0 0.0
+
+# Above table - right side
+pose TableRight 0.4 -0.3 0.4 0.0 1.0 0.0 0.0
+
+# ============================================
+# Lab Object Positions
+# ============================================
+# Beaker position - common lab equipment
+pose Beaker 0.35 0.2 0.25 0.0 0.707 0.707 0.0
+
+# Flask position
+pose Flask 0.35 -0.2 0.25 0.0 0.707 0.707 0.0
+
+# Box pickup position
+pose Box 0.45 0.0 0.15 0.0 1.0 0.0 0.0
+
+# Tool rack position
+pose ToolRack 0.2 0.4 0.35 0.0 0.707 0.0 0.707
+
+# ============================================
+# Place Positions
+# ============================================
+pose PlaceLeft 0.3 0.35 0.2 0.0 1.0 0.0 0.0
+pose PlaceRight 0.3 -0.35 0.2 0.0 1.0 0.0 0.0
+pose PlaceCenter 0.5 0.0 0.2 0.0 1.0 0.0 0.0
+
+# ============================================
+# Inspection Poses (camera viewing angles)
+# ============================================
+pose InspectTop 0.4 0.0 0.5 0.0 1.0 0.0 0.0
+pose InspectAngled 0.35 0.15 0.35 0.0 0.924 0.383 0.0
+
+# ============================================
+# Custom Positions (add your own below)
+# ============================================

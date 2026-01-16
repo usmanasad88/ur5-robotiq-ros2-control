@@ -262,3 +262,34 @@ python3 face_safety_monitor.py
 # python3 face_safety_monitor.py --ros-args -p camera_id:=0 -p threshold_area:=0.2
 
 ./run_safety_monitor.sh --ros-args -p use_realsense:=True
+
+# ===== EPISODE RECORDING WITH GOPRO =====
+# Record synchronized multi-modal data: robot joints, gripper, webcam, and GoPro video
+
+# 1. Start GoPro streaming (one-time per session)
+cd gopro_streaming
+conda activate ur5_python
+python connect_gopro.py
+
+# 2. Launch the program selector UI
+cd /home/mani/Repos/ur_ws
+./run_program_ui.sh
+
+# 3. In the UI:
+# - Check GoPro status shows "📹 GoPro: Streaming"
+# - Enter experiment name
+# - Click "🔴 Record" to start
+# - Execute robot programs
+# - Click "⏹️ End" when finished
+
+# 4. Output files in recordings/{experiment_name}_{timestamp}/:
+# - video.mp4: Webcam video (640x480, 30fps)
+# - gopro_video.mp4: GoPro video (if available)
+# - joint_states.h5: Robot joint data (50Hz sampling)
+# - metadata.json: Recording metadata
+# - program_events.json: Program execution timeline
+
+# For more details, see:
+# - GOPRO_INTEGRATION.md: Complete documentation
+# - GOPRO_INTEGRATION_SUMMARY.md: Implementation summary
+# - test_gopro_integration.py: Test script

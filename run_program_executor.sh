@@ -17,31 +17,47 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 1. Patch the shebang in the installed node scripts to use the Conda environment
-#    This is necessary because 'colcon build' resets it to the system python.
+# 1. Patch the shebang in the installed node scripts to use /usr/bin/env python3
+#    This makes it portable across different users and finds python3 in PATH
 EXECUTOR_SCRIPT="install/ur5_curobo_control/lib/ur5_curobo_control/program_executor_node"
 GESTURE_SCRIPT="install/ur5_curobo_control/lib/ur5_curobo_control/gesture_safety_monitor"
 if [ -f "$EXECUTOR_SCRIPT" ]; then
-    sed -i '1s|^.*$|#!/home/rml/miniconda3/envs/ur5_python/bin/python|' "$EXECUTOR_SCRIPT"
+    sed -i '1s|^.*$|#!/usr/bin/env python3|' "$EXECUTOR_SCRIPT"
 fi
 if [ -f "$GESTURE_SCRIPT" ]; then
-    sed -i '1s|^.*$|#!/home/rml/miniconda3/envs/ur5_python/bin/python|' "$GESTURE_SCRIPT"
+    sed -i '1s|^.*$|#!/usr/bin/env python3|' "$GESTURE_SCRIPT"
 fi
 
-# 2. Export LD_PRELOAD to prevent GLIBCXX errors when using PyTorch/Curobo with ROS 2
+# 2. Activate conda environment for PyTorch/cuRobo support
+#    Detect conda installation for current user
+if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/miniconda3/etc/profile.d/conda.sh"
+    conda activate ur5_python
+elif [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/anaconda3/etc/profile.d/conda.sh"
+    conda activate ur5_python
+else
+    echo "Warning: Conda not found. PyTorch/cuRobo may not be available."
+fi
+
+# 3. Export LD_PRELOAD to prevent GLIBCXX errors when using PyTorch/Curobo with ROS 2
 export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6
 
-# 3. Parse arguments
+# 4. Parse arguments
 PROGRAM_FILE=""
 AUTO_EXECUTE=false
 USE_FAKE_HARDWARE=true
-PRESENTER_CONTROL=true
+PRESENTER_CONTROL=false
 USE_GESTURE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --execute|-e)
             AUTO_EXECUTE=true
+            shift
+            ;;
+        --presenter|-p)
+            PRESENTER_CONTROL=true
             shift
             ;;
         --no-presenter)
@@ -66,12 +82,13 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --execute, -e    Automatically execute the loaded program"
             echo "  --gesture, -g    Enable gesture-based safety monitor"
-            echo "  --no-presenter   Disable presenter/keyboard control"
+            echo "  --presenter, -p  Enable presenter/keyboard control"
+            echo "  --no-presenter   Disable presenter/keyboard control (default)"
             echo "  --real, -r       Use real robot hardware (gripper via action)"
             echo "  --fake, -f       Use fake/simulated hardware (default)"
             echo "  --help, -h       Show this help message"
             echo ""
-            echo "Presenter Controls (enabled by default):"
+            echo "Presenter Controls (when --presenter is enabled):"
             echo "  Next/PageDown/Space/Right  Start or restart program"
             echo "  Prev/PageUp/Left           Pause execution"
             echo "  's' key                    Stop execution"
@@ -95,7 +112,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# 4. Source ROS workspace
+# 5. Source ROS workspace
+# Add ROS 2 Python packages to PYTHONPATH so rclpy is available in conda env
+export PYTHONPATH="/opt/ros/humble/local/lib/python3.10/dist-packages:/opt/ros/humble/lib/python3.10/site-packages:$PYTHONPATH"
 source /opt/ros/humble/setup.bash
 source "$SCRIPT_DIR/install/setup.bash"
 
