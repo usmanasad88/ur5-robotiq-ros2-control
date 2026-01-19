@@ -46,7 +46,7 @@ export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6
 # 4. Parse arguments
 PROGRAM_FILE=""
 AUTO_EXECUTE=false
-USE_FAKE_HARDWARE=true
+USE_FAKE_HARDWARE=false
 PRESENTER_CONTROL=false
 USE_GESTURE=false
 

@@ -1,0 +1,72 @@
+# ============================================
+# Return Resin Bottle - Robot Program
+# ============================================
+# This program picks up the resin bottle from the workpiece
+# position and returns it to storage.
+#
+# Uses joint positions defined in named_positions.txt
+# Joint values are in degrees
+# ============================================
+
+# Set a moderate speed for safe operation
+set_speed(0.5)
+
+# -----------------------------------------
+# Phase 1: Move to Home Position
+# -----------------------------------------
+movetojoint([55, -90, 90, 180, -90, 0])
+wait(1.0)
+
+# Ensure gripper is open before approaching bottle
+opengripper
+wait(0.5)
+
+# -----------------------------------------
+# Phase 2: Move to Resin Bottle at Workpiece
+# -----------------------------------------
+movetojoint([16.25, -7.1, 40.43, 152.85, -58.29, -5.29])
+wait(0.3)
+
+# -----------------------------------------
+# Phase 3: Grasp Bottle
+# -----------------------------------------
+closegripper
+wait(1.0)
+
+# -----------------------------------------
+# Phase 4: Return to Home Position
+# -----------------------------------------
+movetojoint([55, -90, 90, 180, -90, 0])
+wait(0.5)
+
+# -----------------------------------------
+# Phase 5: Move Above Resin Storage
+# -----------------------------------------
+movetojoint([-27.4, -40.3, 95, 124, -90, 0])
+wait(0.5)
+
+# -----------------------------------------
+# Phase 6: Lower to Resin Storage Position
+# -----------------------------------------
+movetojoint([-27.4, -27.23, 91, 121, -90, 0])
+wait(0.3)
+
+# -----------------------------------------
+# Phase 7: Release Bottle
+# -----------------------------------------
+opengripper
+wait(1.0)
+
+# -----------------------------------------
+# Phase 8: Retreat and Return Home
+# -----------------------------------------
+# Lift up (go back to above position)
+movetojoint([-27.4, -40.3, 95, 124, -90, 0])
+wait(0.5)
+
+# Return to Home position
+movetojoint([55, -90, 90, 180, -90, 0])
+wait(0.5)
+
+# Program complete!
+# The resin bottle has been returned to storage.

@@ -76,6 +76,7 @@ ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5 launch_rviz:=true
 
 # Control real robot (NOT for simulation)
 #ros2 run robotiq_2f_urcap_adapter robotiq_2f_adapter_node.py --ros-args -p robot_ip:=192.168.1.102
+ros2 run robotiq_2f_urcap_adapter robotiq_2f_adapter_node.py --ros-args -p 172.17.66.105
 
 # Run general controller with kinematics
 ros2 run ur5_gen_controller random_joint_goal.py --ros-args --params-file /home/mani/Repos/ur_ws/src/Universal_Robots_ROS2_Driver/ur_moveit_config/config/kinematics.yaml

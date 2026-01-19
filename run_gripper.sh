@@ -1,15 +1,12 @@
 #!/bin/bash
-# Launch script for UR5 + Robotiq that fixes RViz crash issue
-# This removes snap libraries from the path to prevent conflicts
+# Launch script for Robotiq 2F-85 gripper adapter
+# Handles environment setup for both rml and mani users
 
 # Deactivate conda environment if active to avoid python version conflicts
 if [[ -n "$CONDA_PREFIX" ]]; then
     echo "Deactivating conda environment: $CONDA_PREFIX"
-    # Remove conda bin from PATH (handling both middle and end of string)
     export PATH=${PATH//$CONDA_PREFIX\/bin:/}
     export PATH=${PATH//$CONDA_PREFIX\/bin/}
-    
-    # Unset CONDA variables
     unset CONDA_PREFIX
     unset CONDA_DEFAULT_ENV
     unset CONDA_PROMPT_MODIFIER
@@ -36,20 +33,15 @@ else
     WORKSPACE="/home/rml/ur5-robotiq-ros2-control"
 fi
 
-# Now source ROS2 (this will append workspace paths)
-cd "$WORKSPACE"
+# Source ROS2 and workspace
 source /opt/ros/humble/setup.bash
-source install/setup.bash
+source "$WORKSPACE/install/setup.bash"
 
-# Launch with provided arguments or defaults
+# Default robot IP
 ROBOT_IP="${1:-172.17.66.105}"
-USE_FAKE="${2:-true}"
 
-echo "Launching UR5 + Robotiq 2F-85..."
+echo "Launching Robotiq 2F-85 Gripper Adapter..."
 echo "Robot IP: $ROBOT_IP"
-echo "Fake Hardware: $USE_FAKE"
 echo ""
 
-exec ros2 launch ur5_robotiq_description ur5_robotiq.launch.py \
-  robot_ip:=$ROBOT_IP \
-  use_fake_hardware:=$USE_FAKE
+exec ros2 run robotiq_2f_urcap_adapter robotiq_2f_adapter_node.py --ros-args -p robot_ip:="$ROBOT_IP"

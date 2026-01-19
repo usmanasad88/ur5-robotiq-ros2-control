@@ -4,13 +4,16 @@ Robot Program Parser for UR5 Control
 
 Parses program files with robot instructions like:
   - movetopose([x, y, z], [qw, qx, qy, qz])
-  - movetojoint([j1, j2, j3, j4, j5, j6])
+  - movetojoint([j1, j2, j3, j4, j5, j6])  # Joint angles in DEGREES
   - wait(seconds)
   - opengripper
   - closegripper
   - gripper(position)  # 0.0 = open, 1.0 = closed
   - # comments are ignored
   - set_speed(factor)  # 0.0-1.0 velocity scaling
+
+Note: Joint angles in program files and named_positions.txt are specified
+      in DEGREES and automatically converted to radians by the parser.
 """
 
 import re
@@ -169,11 +172,13 @@ class ProgramParser:
                 if len(joints) != 6:
                     self.errors.append(f"Line {line_num}: Expected 6 joint values, got {len(joints)}")
                     return None
+                # Convert from degrees to radians
+                joints_rad = [j * 3.14159265359 / 180.0 for j in joints]
                 return RobotInstruction(
                     type=InstructionType.MOVE_TO_JOINT,
                     line_number=line_num,
                     raw_line=line,
-                    joint_positions=joints
+                    joint_positions=joints_rad
                 )
             except ValueError as e:
                 self.errors.append(f"Line {line_num}: Failed to parse joint values: {e}")
@@ -304,9 +309,12 @@ class NamedPositionsParser:
         pose <name> <x> <y> <z> <qw> <qx> <qy> <qz>
         joint <name> <j1> <j2> <j3> <j4> <j5> <j6>
     
+    Note: Joint angles in the config file should be in DEGREES.
+          They will be automatically converted to radians when parsed.
+    
     Example:
         pose Beaker 0.4 0.2 0.3 0.0 1.0 0.0 0.0
-        joint Home 0.0 -1.57 1.57 -1.57 -1.57 0.0
+        joint Home 0.0 -90.0 90.0 -90.0 -90.0 0.0
     """
     
     # Regex patterns
@@ -411,10 +419,12 @@ class NamedPositionsParser:
                         float(joint_match.group(6)),
                         float(joint_match.group(7))
                     ]
+                    # Convert from degrees to radians
+                    joints_rad = [j * 3.14159265359 / 180.0 for j in joints]
                     self.positions.append(NamedPosition(
                         name=name,
                         position_type=PositionType.JOINT,
-                        joint_positions=joints,
+                        joint_positions=joints_rad,
                         description=current_comment
                     ))
                     current_comment = None

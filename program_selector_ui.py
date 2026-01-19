@@ -22,6 +22,9 @@ from datetime import datetime
 import threading
 import queue
 
+# Suppress OpenCV warnings about missing cameras
+os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
+
 # Video capture
 try:
     import cv2
@@ -278,40 +281,84 @@ class ROSProgramController:
         return False, "Service call timeout"
     
     def open_gripper(self) -> tuple[bool, str]:
-        """Send open gripper command."""
+        """Send open gripper command via ROS 2 action."""
         if not ROS_AVAILABLE:
             return False, "ROS not available"
         
         try:
-            msg = String()
-            msg.data = "open"
-            self.gripper_pub.publish(msg)
+            # Use subprocess to call ros2 action send_goal (proven to work)
+            import subprocess
+            
+            # Open = position 0.085m (85mm opening)
+            cmd = (
+                'source /opt/ros/humble/setup.bash && '
+                'source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && '
+                'ros2 action send_goal -f /robotiq_2f_urcap_adapter/gripper_command '
+                'robotiq_2f_urcap_adapter/action/GripperCommand '
+                "'{command: {position: 0.085, max_effort: 100.0, max_speed: 0.1}}'"
+            )
+            
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                executable='/bin/bash'
+            )
             
             # Also publish visualization position
             viz_msg = Float64()
             viz_msg.data = 0.0
             self.gripper_viz_pub.publish(viz_msg)
             
-            return True, "Open gripper command sent"
+            if result.returncode == 0:
+                return True, "Gripper opened successfully"
+            else:
+                return False, f"Gripper command failed: {result.stderr}"
+        except subprocess.TimeoutExpired:
+            return False, "Gripper command timed out"
         except Exception as e:
             return False, f"Failed to send gripper command: {e}"
     
     def close_gripper(self) -> tuple[bool, str]:
-        """Send close gripper command."""
+        """Send close gripper command via ROS 2 action."""
         if not ROS_AVAILABLE:
             return False, "ROS not available"
         
         try:
-            msg = String()
-            msg.data = "close"
-            self.gripper_pub.publish(msg)
+            # Use subprocess to call ros2 action send_goal (proven to work)
+            import subprocess
+            
+            # Close = position 0.0m (fully closed)
+            cmd = (
+                'source /opt/ros/humble/setup.bash && '
+                'source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && '
+                'ros2 action send_goal -f /robotiq_2f_urcap_adapter/gripper_command '
+                'robotiq_2f_urcap_adapter/action/GripperCommand '
+                "'{command: {position: 0.0, max_effort: 100.0, max_speed: 0.1}}'"
+            )
+            
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                executable='/bin/bash'
+            )
             
             # Also publish visualization position
             viz_msg = Float64()
             viz_msg.data = 0.8  # Nearly closed
             self.gripper_viz_pub.publish(viz_msg)
             
-            return True, "Close gripper command sent"
+            if result.returncode == 0:
+                return True, "Gripper closed successfully"
+            else:
+                return False, f"Gripper command failed: {result.stderr}"
+        except subprocess.TimeoutExpired:
+            return False, "Gripper command timed out"
         except Exception as e:
             return False, f"Failed to send gripper command: {e}"
     
@@ -324,16 +371,38 @@ class ROSProgramController:
             # Clamp position to valid range
             position = max(0.0, min(1.0, position))
             
-            msg = String()
-            msg.data = f"position:{position}"
-            self.gripper_pub.publish(msg)
+            # Convert: 0 (open) -> 0.085m, 1 (closed) -> 0.0m
+            robotiq_position = (1.0 - position) * 0.085
+            
+            import subprocess
+            cmd = (
+                'source /opt/ros/humble/setup.bash && '
+                'source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && '
+                'ros2 action send_goal -f /robotiq_2f_urcap_adapter/gripper_command '
+                'robotiq_2f_urcap_adapter/action/GripperCommand '
+                f"'{{command: {{position: {robotiq_position}, max_effort: 100.0, max_speed: 0.1}}}}'"
+            )
+            
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                executable='/bin/bash'
+            )
             
             # Also publish visualization position
             viz_msg = Float64()
             viz_msg.data = position * 0.8  # Scale to gripper range
             self.gripper_viz_pub.publish(viz_msg)
             
-            return True, f"Gripper position set to {position:.2f}"
+            if result.returncode == 0:
+                return True, f"Gripper position set to {position:.2f}"
+            else:
+                return False, f"Gripper command failed: {result.stderr}"
+        except subprocess.TimeoutExpired:
+            return False, "Gripper command timed out"
         except Exception as e:
             return False, f"Failed to send gripper command: {e}"
     
@@ -422,11 +491,14 @@ class ROSProgramController:
 def get_programs_directory():
     """Get the programs directory path."""
     workspace_root = Path(__file__).parent
-    programs_dir = workspace_root / "install/ur5_curobo_control/share/ur5_curobo_control/programs"
     
-    # Fallback to source directory if install not found
-    if not programs_dir.exists():
-        programs_dir = workspace_root / "src/ur5_curobo_control/programs"
+    # Try source directory first (better for development - changes are immediate)
+    programs_dir = workspace_root / "src/ur5_curobo_control/programs"
+    if programs_dir.exists():
+        return programs_dir
+    
+    # Fallback to install directory
+    programs_dir = workspace_root / "install/ur5_curobo_control/share/ur5_curobo_control/programs"
     
     return programs_dir
 
@@ -435,13 +507,13 @@ def get_named_positions_file():
     """Get the path to the named positions configuration file."""
     workspace_root = Path(__file__).parent
     
-    # Try install directory first
-    positions_file = workspace_root / "install/ur5_curobo_control/share/ur5_curobo_control/config/named_positions.txt"
+    # Try source directory first (better for development - changes are immediate)
+    positions_file = workspace_root / "src/ur5_curobo_control/config/named_positions.txt"
     if positions_file.exists():
         return positions_file
     
-    # Fallback to source directory
-    positions_file = workspace_root / "src/ur5_curobo_control/config/named_positions.txt"
+    # Fallback to install directory
+    positions_file = workspace_root / "install/ur5_curobo_control/share/ur5_curobo_control/config/named_positions.txt"
     if positions_file.exists():
         return positions_file
     
@@ -537,6 +609,10 @@ class EpisodeRecorder:
         })
         
         # Initialize video capture (try multiple camera indices)
+        # Suppress OpenCV warnings by setting logging level
+        import os
+        os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
+        
         for camera_idx in [0, 1, 2]:
             self.video_capture = cv2.VideoCapture(camera_idx)
             if self.video_capture.isOpened():
@@ -1147,7 +1223,7 @@ def main():
     
     with cmd_tab3:
         st.markdown("#### Manual Joint Input")
-        st.caption("Enter joint positions in radians")
+        st.caption("Enter joint positions in degrees")
         
         # Manual joint input
         mcols = st.columns(6)
@@ -1158,11 +1234,11 @@ def main():
             with col:
                 val = st.number_input(
                     joint_labels[i],
-                    min_value=-6.28,
-                    max_value=6.28,
+                    min_value=-360.0,
+                    max_value=360.0,
                     value=0.0,
-                    step=0.1,
-                    format="%.2f",
+                    step=5.0,
+                    format="%.1f",
                     key=f"manual_j{i}"
                 )
                 manual_joints.append(val)
@@ -1172,8 +1248,10 @@ def main():
         if st.button("🚀 Move to Joint Position", type="primary", use_container_width=True,
                     disabled=not ROS_AVAILABLE):
             if st.session_state.controller:
+                # Convert from degrees to radians
+                manual_joints_rad = [j * 3.14159265359 / 180.0 for j in manual_joints]
                 success, msg = st.session_state.controller.move_to_joint_positions(
-                    manual_joints, duration=manual_duration
+                    manual_joints_rad, duration=manual_duration
                 )
                 if success:
                     st.success(msg)
@@ -1188,11 +1266,13 @@ def main():
         if st.session_state.controller and ROS_AVAILABLE:
             joint_state = st.session_state.controller.get_joint_state()
             if joint_state and joint_state.position:
-                st.markdown("**Current Joint Positions:**")
+                st.markdown("**Current Joint Positions (degrees):**")
                 curr_cols = st.columns(6)
                 for i, (col, pos) in enumerate(zip(curr_cols, joint_state.position)):
                     with col:
-                        st.metric(f"J{i+1}", f"{pos:.3f}")
+                        # Convert from radians to degrees for display
+                        pos_deg = pos * 180.0 / 3.14159265359
+                        st.metric(f"J{i+1}", f"{pos_deg:.1f}°")
     
     st.markdown("---")
     

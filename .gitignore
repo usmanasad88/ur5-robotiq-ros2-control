@@ -10,6 +10,9 @@ recordings/
 # Large asset files (3D models, scenes, point clouds)
 assets/
 
+# Large photo/video files
+photos/
+
 # ROS 2 build artifacts
 build/
 install/
