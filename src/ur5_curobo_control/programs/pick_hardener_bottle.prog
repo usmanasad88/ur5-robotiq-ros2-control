@@ -51,12 +51,31 @@ movetojoint([55, -90, 90, 180, -90, 0])
 wait(0.5)
 
 # -----------------------------------------
-# Phase 6: Move to Hardener Workpiece Position
+# Phase 6: Move Above Hardener Workpiece Position
 # -----------------------------------------
-movetojoint([33.15, -18.70, 71.4, 130, -70, 0])
+movetojoint([33.15, -28.0, 75.0, 135, -70, 0])
 wait(0.5)
 
+# -----------------------------------------
+# Phase 7: Lower to Hardener Workpiece Position
+# -----------------------------------------
+movetojoint([33.15, -18.70, 71.4, 130, -70, 0])
+wait(0.3)
+
+# -----------------------------------------
+# Phase 8: Release Bottle
+# -----------------------------------------
 opengripper
+wait(0.5)
+
+# -----------------------------------------
+# Phase 9: Lift Up and Return Home
+# -----------------------------------------
+movetojoint([33.15, -28.0, 75.0, 135, -70, 0])
+wait(0.5)
+
+movetojoint([55, -90, 90, 180, -90, 0])
+wait(0.5)
 
 # Program complete!
 # The hardener bottle is now at the workpiece position.

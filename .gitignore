@@ -9,6 +9,7 @@ recordings/
 
 # Large asset files (3D models, scenes, point clouds)
 assets/
+Latex/
 
 # Large photo/video files
 photos/

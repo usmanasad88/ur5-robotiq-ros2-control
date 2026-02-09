@@ -1003,20 +1003,20 @@ class UR5ProgramExecutorNode(Node):
             
             import subprocess
             
-            # Build the command - note the action interface format
-            cmd = [
-                'ros2', 'action', 'send_goal', '-f',
-                '/robotiq_2f_urcap_adapter/gripper_command',
-                'robotiq_2f_urcap_adapter/action/GripperCommand',
-                f'{{command: {{position: {robotiq_position}, max_effort: 100.0, max_speed: 0.1}}}}'
-            ]
+            # Build the command as a single shell string with proper quoting
+            # The goal message MUST be wrapped in single quotes for the shell to pass it correctly
+            cmd = (
+                'ros2 action send_goal -f /robotiq_2f_urcap_adapter/gripper_command '
+                'robotiq_2f_urcap_adapter/action/GripperCommand '
+                f"'{{command: {{position: {robotiq_position}, max_effort: 100.0, max_speed: 0.1}}}}'"
+            )
             
-            self.get_logger().info(f"Running command: {' '.join(cmd)}")
+            self.get_logger().info(f"Running command: {cmd}")
             
             try:
                 # Need to source ROS environment in subprocess
                 # Unset LD_PRELOAD to avoid conflicts with the parent process's libstdc++ preload
-                env_cmd = 'unset LD_PRELOAD && source /opt/ros/humble/setup.bash && source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && ' + ' '.join(cmd)
+                env_cmd = 'unset LD_PRELOAD && source /opt/ros/humble/setup.bash && source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && ' + cmd
                 result = subprocess.run(
                     env_cmd,
                     shell=True,
