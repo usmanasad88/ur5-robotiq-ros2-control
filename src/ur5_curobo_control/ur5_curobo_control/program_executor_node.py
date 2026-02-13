@@ -50,6 +50,13 @@ from ur5_curobo_control.program_parser import (
     ProgramParser, RobotInstruction, InstructionType
 )
 
+# Import Robotiq gripper action
+try:
+    from robotiq_2f_urcap_adapter.action import GripperCommand as GripperCommandAction
+    GRIPPER_ACTION_AVAILABLE = True
+except ImportError:
+    GRIPPER_ACTION_AVAILABLE = False
+
 # ROS 2 imports for path resolution
 from ament_index_python.packages import get_package_share_directory
 
@@ -593,6 +600,16 @@ class UR5ProgramExecutorNode(Node):
             '/gripper_position_command',
             10
         )
+        
+        # Gripper action client for real hardware
+        self.gripper_action_client = None
+        if GRIPPER_ACTION_AVAILABLE and not self.use_fake_hardware:
+            self.gripper_action_client = ActionClient(
+                self,
+                GripperCommandAction,
+                '/robotiq_2f_urcap_adapter/gripper_command'
+            )
+            self.get_logger().info("Gripper action client created for /robotiq_2f_urcap_adapter/gripper_command")
     
     def _setup_services(self):
         """Set up ROS services."""
@@ -1184,15 +1201,16 @@ class UR5ProgramExecutorNode(Node):
     def execute_gripper(self, position: float) -> bool:
         """Execute gripper command.
         
-        For real hardware: Uses ros2 action to send command to Robotiq gripper.
+        For real hardware: Uses ros2 action send_goal subprocess command.
         For fake hardware: Just publishes to simple topic and logs.
         
         Args:
             position: Gripper position (0.0 = fully open, 1.0 = fully closed)
         """
-        # Convert normalized position (0-1) to Robotiq position (0 = open, 0.085 = closed)
-        # Robotiq 2F-85 has 85mm stroke
-        robotiq_position = position * 0.085
+        # Convert normalized position (0-1) to Robotiq position
+        # Robotiq 2F-85: 0.085m = fully open, 0.0m = fully closed
+        # So we invert: position 0 (open) -> 0.085, position 1 (closed) -> 0.0
+        robotiq_position = (1.0 - position) * 0.085
         
         if self.use_fake_hardware:
             # Fake hardware - publish to visualization topic for RViz animation
@@ -1204,25 +1222,46 @@ class UR5ProgramExecutorNode(Node):
             msg = String()
             msg.data = f"position:{position}"
             self.gripper_pub.publish(msg)
-            self.get_logger().info(f"[FAKE] Gripper command: position={position} (robotiq_pos={robotiq_position:.4f})")
+            self.get_logger().info(f"[FAKE] Gripper command: position={position} (robotiq_pos={robotiq_position:.4f}m)")
             time.sleep(0.5)
         else:
-            # Real hardware - use ros2 action send_goal command
-            self.get_logger().info(f"[REAL] Sending gripper command: position={robotiq_position:.4f}")
+            # Real hardware - use ros2 action send_goal command via subprocess
+            self.get_logger().info(f"[REAL] Sending gripper command: position={robotiq_position:.4f}m (normalized={position})")
             
             import subprocess
+            
+            # Build the command as a single shell string with proper quoting
+            # The goal message MUST be wrapped in single quotes for the shell to pass it correctly
             cmd = (
-                f"ros2 action send_goal -f /robotiq_2f_urcap_adapter/gripper_command "
-                f"robotiq_2f_urcap_adapter/GripperCommand "
-                f"'{{ command: {{ position: {robotiq_position}, max_effort: 70, max_speed: 0.05 }}}}'"
+                'ros2 action send_goal -f /robotiq_2f_urcap_adapter/gripper_command '
+                'robotiq_2f_urcap_adapter/action/GripperCommand '
+                f"'{{command: {{position: {robotiq_position}, max_effort: 100.0, max_speed: 0.1}}}}'"
             )
             
+            self.get_logger().info(f"Running command: {cmd}")
+            
             try:
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+                # Need to source ROS environment in subprocess
+                # Unset LD_PRELOAD to avoid conflicts with the parent process's libstdc++ preload
+                env_cmd = 'unset LD_PRELOAD && source /opt/ros/humble/setup.bash && source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && ' + cmd
+                result = subprocess.run(
+                    env_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    executable='/bin/bash'
+                )
+                
+                self.get_logger().info(f"Subprocess stdout: {result.stdout}")
+                if result.stderr:
+                    self.get_logger().warn(f"Subprocess stderr: {result.stderr}")
+                    
                 if result.returncode == 0:
                     self.get_logger().info("Gripper command executed successfully")
                 else:
-                    self.get_logger().warn(f"Gripper command returned non-zero: {result.stderr}")
+                    self.get_logger().warn(f"Gripper command returned code {result.returncode}")
+                    
             except subprocess.TimeoutExpired:
                 self.get_logger().error("Gripper command timed out")
                 return False

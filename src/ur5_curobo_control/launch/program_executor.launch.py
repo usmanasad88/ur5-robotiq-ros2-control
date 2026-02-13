@@ -69,7 +69,7 @@ def generate_launch_description():
     
     declare_use_fake_hardware = DeclareLaunchArgument(
         'use_fake_hardware',
-        default_value='true',
+        default_value='false',
         description='Use fake hardware (sim) or real robot for gripper'
     )
     
@@ -79,18 +79,9 @@ def generate_launch_description():
         description='Enable Logitech presenter control (Next=start/restart, Prev=pause)'
     )
     
-    # Robotiq gripper adapter - only launched when NOT using fake hardware
-    robotiq_adapter_node = Node(
-        package='robotiq_2f_urcap_adapter',
-        executable='robotiq_2f_adapter_node.py',
-        name='robotiq_2f_urcap_adapter',
-        output='screen',
-        parameters=[{
-            'robot_ip': robot_ip,
-        }],
-        condition=UnlessCondition(use_fake_hardware)
-    )
-    
+    # Note: Robotiq gripper adapter should be launched separately with run_gripper.sh
+    # to avoid conflicts. The program executor will send commands via ros2 action.
+
     program_executor_node = Node(
         package='ur5_curobo_control',
         executable='program_executor_node',
@@ -120,6 +111,5 @@ def generate_launch_description():
         declare_auto_execute,
         declare_use_fake_hardware,
         declare_presenter_control,
-        robotiq_adapter_node,
         program_executor_node
     ])

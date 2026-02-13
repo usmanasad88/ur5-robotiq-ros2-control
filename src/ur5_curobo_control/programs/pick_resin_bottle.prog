@@ -1,0 +1,81 @@
+# ============================================
+# Pick Resin Bottle - Robot Program
+# ============================================
+# This program picks up the resin bottle from storage
+# and moves it to the workpiece position.
+#
+# Uses joint positions defined in named_positions.txt
+# Joint values are in degrees
+# ============================================
+
+# Set a moderate speed for safe operation
+set_speed(0.5)
+
+# -----------------------------------------
+# Phase 1: Move to Home Position
+# -----------------------------------------
+movetojoint([55, -90, 90, 180, -90, 0])
+wait(1.0)
+
+# Ensure gripper is open before approaching bottle
+opengripper
+wait(0.5)
+
+# -----------------------------------------
+# Phase 2: Move Above Resin Bottle Storage
+# -----------------------------------------
+movetojoint([-27.4, -40.3, 95, 124, -90, 0])
+wait(0.5)
+
+# -----------------------------------------
+# Phase 3: Lower to Resin Bottle Storage
+# -----------------------------------------
+movetojoint([-27.4, -27.23, 91, 121, -90, 0])
+wait(0.3)
+
+# -----------------------------------------
+# Phase 4: Grasp Bottle
+# -----------------------------------------
+closegripper
+wait(1.0)
+
+# -----------------------------------------
+# Phase 5: Lift and Return to Home
+# -----------------------------------------
+# First lift up (go back to above position)
+movetojoint([-27.4, -40.3, 95, 124, -90, 0])
+wait(0.5)
+
+# Move to Home position
+movetojoint([55, -90, 90, 180, -90, 0])
+wait(0.5)
+
+# -----------------------------------------
+# Phase 6: Move Above Resin Workpiece Position
+# -----------------------------------------
+movetojoint([19.19, -17.21, 43.98, 153.6, -58.3, -5.29])
+wait(0.5)
+
+# -----------------------------------------
+# Phase 7: Lower to Resin Workpiece Position
+# -----------------------------------------
+movetojoint([16.25, -7.1, 40.43, 152.85, -58.29, -5.29])
+wait(0.3)
+
+# -----------------------------------------
+# Phase 8: Release Bottle
+# -----------------------------------------
+opengripper
+wait(0.5)
+
+# -----------------------------------------
+# Phase 9: Lift Up and Return Home
+# -----------------------------------------
+movetojoint([19.19, -17.21, 43.98, 153.6, -58.3, -5.29])
+wait(0.5)
+
+movetojoint([55, -90, 90, 180, -90, 0])
+wait(0.5)
+
+# Program complete!
+# The resin bottle is now at the workpiece position.
