@@ -21,6 +21,8 @@ import json
 from datetime import datetime
 import threading
 import queue
+import urllib.request
+import urllib.error
 
 # Video capture
 try:
@@ -966,6 +968,20 @@ def main():
             st.error("❌ Program Executor: Not Running")
             st.markdown("Start the executor with:")
             st.code("./run_program_executor.sh", language="bash")
+        
+        # External Control API status
+        api_port = 5050
+        api_url = f"http://localhost:{api_port}"
+        try:
+            req = urllib.request.Request(f"{api_url}/api/status", method="GET")
+            req.add_header("Accept", "application/json")
+            with urllib.request.urlopen(req, timeout=0.5) as resp:
+                st.success(f"🌐 External API: Running ({api_url})")
+        except Exception:
+            st.info("🌐 External API: Not running")
+            with st.expander("Start external API"):
+                st.code("./run_external_api.sh", language="bash")
+                st.caption("Enables external services to control the robot via REST.")
         
         # Check joint state availability
         if st.session_state.controller and ROS_AVAILABLE:

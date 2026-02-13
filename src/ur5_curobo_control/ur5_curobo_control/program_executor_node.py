@@ -97,6 +97,18 @@ class UR5ProgramExecutorNode(Node):
         self.declare_parameter('target_pose_quaternion', [1.0, 0.0, 0.0, 0.0],
             ParameterDescriptor(description='Target pose quaternion [w, x, y, z]'))
         
+        # Parameters for save position command
+        self.declare_parameter('save_position_name', '',
+            ParameterDescriptor(description='Name for saving current position'))
+        self.declare_parameter('save_position_type', 'joint',
+            ParameterDescriptor(description='Type for saving position: joint or pose'))
+        
+        # Parameters for relative motion commands
+        self.declare_parameter('relative_move_direction', '',
+            ParameterDescriptor(description='Direction for relative move: left/right/forward/back/up/down'))
+        self.declare_parameter('relative_move_distance', 0.05,
+            ParameterDescriptor(description='Distance in meters for relative move (default 5cm)'))
+        
         robot_config_file = self.get_parameter('robot_config_file').value
         self.use_fake_hardware = self.get_parameter('use_fake_hardware').value
         world_config_file = self.get_parameter('world_config_file').value
@@ -119,6 +131,7 @@ class UR5ProgramExecutorNode(Node):
         self.current_program_name = ""
         self.safety_triggered = False
         self.parser = ProgramParser()
+        self._stop_event = threading.Event()  # Used to interrupt blocking sleeps on stop/pause
         
         # Initialize cuRobo
         self.tensor_args = TensorDeviceType()
@@ -429,20 +442,26 @@ class UR5ProgramExecutorNode(Node):
             return
         
         if self.state == ExecutorState.IDLE:
-            # Start or restart program execution
-            self.get_logger().info(f"Starting program: {self.current_program_name}")
+            # Resume from current index, or restart if program is complete
+            if self.current_instruction_idx >= len(self.current_program):
+                self.current_instruction_idx = 0
+                self.get_logger().info(f"Restarting program: {self.current_program_name}")
+            else:
+                self.get_logger().info(f"Resuming program: {self.current_program_name} from step {self.current_instruction_idx + 1}/{len(self.current_program)}")
+            
             self.state = ExecutorState.EXECUTING
-            self.current_instruction_idx = 0
+            self._stop_event.clear()
             
             # Create execution timer if not exists
             if self.execution_timer is None:
                 self.execution_timer = self.create_timer(0.1, self.execution_step)
             
-            self.publish_status(f"Started: {self.current_program_name}")
+            self.publish_status(f"Executing: {self.current_program_name}")
             
         elif self.state == ExecutorState.PAUSED:
             # Resume execution
             self.get_logger().info("Resuming execution...")
+            self._stop_event.clear()
             self.state = ExecutorState.EXECUTING
             self.publish_status("Resumed")
     
@@ -624,6 +643,22 @@ class UR5ProgramExecutorNode(Node):
             self.move_to_pose_callback,
             callback_group=self.callback_group
         )
+        
+        # Service to save current position as a named position
+        self.save_position_srv = self.create_service(
+            Trigger,
+            '~/save_position',
+            self.save_position_callback,
+            callback_group=self.callback_group
+        )
+        
+        # Service to move relative in task space (Cartesian offset)
+        self.move_relative_srv = self.create_service(
+            Trigger,
+            '~/move_relative',
+            self.move_relative_callback,
+            callback_group=self.callback_group
+        )
     
     def joint_state_callback(self, msg: JointState):
         """Handle incoming joint states."""
@@ -673,14 +708,19 @@ class UR5ProgramExecutorNode(Node):
             response.message = "Already executing a program"
             return response
         
+        # Resume from current index; restart only if program is complete
+        if self.current_instruction_idx >= len(self.current_program):
+            self.current_instruction_idx = 0
+        
         self.state = ExecutorState.EXECUTING
-        self.current_instruction_idx = 0
+        self._stop_event.clear()
         
         # Start execution timer
         self.execution_timer = self.create_timer(0.1, self.execution_step)
         
+        remaining = len(self.current_program) - self.current_instruction_idx
         response.success = True
-        response.message = f"Started executing program: {self.current_program_name}"
+        response.message = f"Executing {self.current_program_name} from step {self.current_instruction_idx + 1} ({remaining} remaining)"
         self.publish_status(f"Executing: {self.current_program_name}")
         return response
     
@@ -822,6 +862,182 @@ class UR5ProgramExecutorNode(Node):
         
         return response
     
+    def save_position_callback(self, request, response):
+        """Service callback to save current position as a named position.
+        
+        Reads save_position_name and save_position_type parameters,
+        then appends the current position to named_positions.txt.
+        """
+        if self.current_joint_state is None:
+            response.success = False
+            response.message = "Cannot save: no joint state received"
+            return response
+        
+        name = self.get_parameter('save_position_name').value
+        pos_type = self.get_parameter('save_position_type').value  # "joint" or "pose"
+        
+        if not name:
+            response.success = False
+            response.message = "Set 'save_position_name' parameter before calling save_position"
+            return response
+        
+        # Sanitise name (no spaces, replace with underscore)
+        name = name.strip().replace(' ', '_')
+        
+        # Find the named_positions.txt file
+        config_dir = None
+        if self.programs_dir:
+            config_dir = os.path.join(os.path.dirname(self.programs_dir), 'config')
+        if not config_dir or not os.path.isdir(config_dir):
+            # Try source tree
+            workspace_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            config_dir = os.path.join(workspace_root, 'src', 'ur5_curobo_control', 'config')
+        
+        np_file = os.path.join(config_dir, 'named_positions.txt') if config_dir else None
+        if not np_file or not os.path.exists(np_file):
+            response.success = False
+            response.message = f"Named positions file not found (looked in {config_dir})"
+            return response
+        
+        try:
+            joint_values = self.current_joint_state.cpu().numpy().tolist()
+            
+            if pos_type == "pose":
+                # Use FK to get EE pose
+                kin_state = self.motion_gen.kinematics.get_state(
+                    self.current_joint_state.view(1, -1)
+                )
+                ee_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
+                ee_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()  # [w, x, y, z]
+                
+                line = f"pose {name} {ee_pos[0]:.4f} {ee_pos[1]:.4f} {ee_pos[2]:.4f} {ee_quat[0]:.4f} {ee_quat[1]:.4f} {ee_quat[2]:.4f} {ee_quat[3]:.4f}\n"
+                msg = f"Saved pose '{name}': pos=[{ee_pos[0]:.4f}, {ee_pos[1]:.4f}, {ee_pos[2]:.4f}], quat=[{ee_quat[0]:.4f}, {ee_quat[1]:.4f}, {ee_quat[2]:.4f}, {ee_quat[3]:.4f}]"
+            else:
+                # Save as joint position
+                vals_str = ' '.join(f'{v:.4f}' for v in joint_values)
+                line = f"joint {name} {vals_str}\n"
+                msg = f"Saved joint position '{name}': [{', '.join(f'{v:.4f}' for v in joint_values)}]"
+            
+            # Append to file
+            with open(np_file, 'a') as f:
+                f.write(f"# Saved at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(line)
+            
+            # Also update installed copy if it exists (for symlink-install, this is the same file)
+            installed_np = os.path.join(
+                os.path.dirname(self.programs_dir) if self.programs_dir else '',
+                'config', 'named_positions.txt'
+            )
+            if installed_np != np_file and os.path.exists(installed_np):
+                with open(installed_np, 'a') as f:
+                    f.write(f"# Saved at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(line)
+            
+            self.get_logger().info(msg)
+            response.success = True
+            response.message = msg
+            
+        except Exception as e:
+            response.success = False
+            response.message = f"Error saving position: {e}"
+            self.get_logger().error(f"Error saving position: {e}")
+        
+        return response
+    
+    def move_relative_callback(self, request, response):
+        """Service callback to move the end-effector by a Cartesian offset.
+        
+        Reads relative_move_direction and relative_move_distance parameters.
+        Directions are relative to the robot base frame:
+          - left/right  → Y axis (left = +Y, right = -Y)
+          - forward/back → X axis (forward = +X, back = -X)
+          - up/down      → Z axis (global gravity; up = +Z, down = -Z)
+        
+        The end-effector orientation is preserved.
+        """
+        if self.state == ExecutorState.EXECUTING:
+            response.success = False
+            response.message = "Cannot move: program is executing"
+            return response
+        
+        if self.current_joint_state is None:
+            response.success = False
+            response.message = "Cannot move: no joint state received"
+            return response
+        
+        direction = self.get_parameter('relative_move_direction').value.strip().lower()
+        distance = self.get_parameter('relative_move_distance').value
+        
+        if not direction:
+            response.success = False
+            response.message = "Set 'relative_move_direction' parameter (left/right/forward/back/up/down)"
+            return response
+        
+        # Map direction to offset in base frame
+        direction_map = {
+            'left':    [0.0, +1.0, 0.0],
+            'right':   [0.0, -1.0, 0.0],
+            'forward': [+1.0, 0.0, 0.0],
+            'back':    [-1.0, 0.0, 0.0],
+            'up':      [0.0, 0.0, +1.0],
+            'down':    [0.0, 0.0, -1.0],
+        }
+        
+        if direction not in direction_map:
+            response.success = False
+            response.message = f"Unknown direction '{direction}'. Use: left, right, forward, back, up, down"
+            return response
+        
+        offset = [d * distance for d in direction_map[direction]]
+        
+        try:
+            # Get current EE pose via FK
+            kin_state = self.motion_gen.kinematics.get_state(
+                self.current_joint_state.view(1, -1)
+            )
+            ee_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
+            ee_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
+            
+            # Apply offset to position (keep orientation unchanged)
+            target_pos = [ee_pos[i] + offset[i] for i in range(3)]
+            
+            self.get_logger().info(
+                f"Relative move: {direction} {distance:.3f}m  "
+                f"from [{ee_pos[0]:.4f}, {ee_pos[1]:.4f}, {ee_pos[2]:.4f}] "
+                f"to [{target_pos[0]:.4f}, {target_pos[1]:.4f}, {target_pos[2]:.4f}]"
+            )
+            
+            # Plan motion with cuRobo
+            target_pose = CuroboPose(
+                position=torch.tensor(target_pos, device=self.tensor_args.device, dtype=self.tensor_args.dtype),
+                quaternion=torch.tensor(ee_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
+            )
+            start_state = CuroboJointState.from_position(self.current_joint_state.view(1, -1))
+            
+            result = self.motion_gen.plan_single(
+                start_state, target_pose,
+                MotionGenPlanConfig(enable_graph=False, timeout=5.0)
+            )
+            
+            if result.success.item():
+                traj = result.get_interpolated_plan()
+                self.publish_trajectory(traj)
+                duration = self.estimate_trajectory_duration(traj)
+                response.success = True
+                response.message = f"Moving {direction} {distance:.3f}m (duration: {duration:.1f}s)"
+                self.get_logger().info(f"Relative move planned, executing trajectory")
+            else:
+                response.success = False
+                response.message = f"Motion planning failed for {direction} move: {result.status}"
+                self.get_logger().error(f"Relative move planning failed: {result.status}")
+        
+        except Exception as e:
+            response.success = False
+            response.message = f"Error planning relative move: {e}"
+            self.get_logger().error(f"Error in move_relative: {e}")
+        
+        return response
+    
     def execution_step(self):
         """Execute the next instruction in the program."""
         if self.state != ExecutorState.EXECUTING:
@@ -849,6 +1065,10 @@ class UR5ProgramExecutorNode(Node):
         self.get_logger().info(f"Executing [{self.current_instruction_idx + 1}/{len(self.current_program)}]: {instruction.raw_line}")
         
         success = self.execute_instruction(instruction)
+        
+        # If stop/pause was triggered during execution, don't advance the index
+        if self.state != ExecutorState.EXECUTING:
+            return
         
         if success:
             self.current_instruction_idx += 1
@@ -910,9 +1130,11 @@ class UR5ProgramExecutorNode(Node):
             traj = result.interpolated_plan
             self.publish_trajectory(traj)
             
-            # Wait for trajectory to complete (approximate)
+            # Wait for trajectory to complete, but allow interruption by stop/pause
             traj_duration = self.estimate_trajectory_duration(traj)
-            time.sleep(traj_duration + 0.5)  # Add small buffer
+            if self._stop_event.wait(timeout=traj_duration + 0.5):
+                self.get_logger().info("Motion interrupted by stop/pause")
+                return False
             return True
         else:
             self.get_logger().error(f"Motion planning failed: {result.status}")
@@ -942,7 +1164,10 @@ class UR5ProgramExecutorNode(Node):
         traj_msg.points.append(point)
         self.traj_pub.publish(traj_msg)
         
-        time.sleep(duration + 0.5)
+        # Wait for trajectory to complete, but allow interruption
+        if self._stop_event.wait(timeout=duration + 0.5):
+            self.get_logger().info("Joint motion interrupted by stop/pause")
+            return False
         return True
     
     def execute_wait(self, instruction: RobotInstruction) -> bool:
@@ -951,7 +1176,9 @@ class UR5ProgramExecutorNode(Node):
             return False
         
         self.get_logger().info(f"Waiting {instruction.wait_duration} seconds...")
-        time.sleep(instruction.wait_duration)
+        if self._stop_event.wait(timeout=instruction.wait_duration):
+            self.get_logger().info("Wait interrupted by stop/pause")
+            return False
         return True
     
     def execute_gripper(self, position: float) -> bool:
@@ -1003,8 +1230,10 @@ class UR5ProgramExecutorNode(Node):
                 self.get_logger().error(f"Error executing gripper command: {e}")
                 return False
         
-        # Wait for gripper to complete movement
-        time.sleep(1.0)
+        # Wait for gripper to complete movement, but allow interruption
+        if self._stop_event.wait(timeout=1.0):
+            self.get_logger().info("Gripper wait interrupted by stop/pause")
+            return False
         return True
     
     def publish_trajectory(self, traj_input):
@@ -1067,25 +1296,37 @@ class UR5ProgramExecutorNode(Node):
         """Pause or resume execution."""
         if pause and self.state == ExecutorState.EXECUTING:
             self.state = ExecutorState.PAUSED
+            self._stop_event.set()  # Interrupt any ongoing sleep
             self.stop_robot()
             self.publish_status("Paused")
         elif not pause and self.state == ExecutorState.PAUSED:
+            self._stop_event.clear()
             self.state = ExecutorState.EXECUTING
             self.publish_status("Resumed")
     
     def stop_execution(self):
-        """Stop program execution."""
+        """Stop program execution and hold robot at current position.
+        
+        Unlike the old behavior, this does NOT reset the instruction index.
+        The robot holds its current position. Calling execute again (or pressing
+        Next) resumes from wherever the program left off.
+        """
+        self._stop_event.set()  # Interrupt any ongoing sleep/wait
+        
         if self.execution_timer:
             self.execution_timer.cancel()
             self.execution_timer = None
         
         self.state = ExecutorState.IDLE
-        self.current_instruction_idx = 0  # Reset to beginning for restart
+        # Deliberately NOT resetting current_instruction_idx —
+        # this preserves the program position so the user can resume.
         self.stop_robot()
-        self.publish_status("Stopped - Press [Next] to restart")
+        
+        remaining = len(self.current_program) - self.current_instruction_idx if self.current_program else 0
+        self.publish_status(f"Stopped at step {self.current_instruction_idx}/{len(self.current_program) if self.current_program else 0} - holding position")
         
         if self.presenter_enabled:
-            self.get_logger().info("Program stopped. Press presenter [Next] button to restart.")
+            self.get_logger().info(f"Program stopped at step {self.current_instruction_idx}. Press [Next] to resume, load a new program to restart.")
     
     def publish_status(self, status: str):
         """Publish executor status."""
