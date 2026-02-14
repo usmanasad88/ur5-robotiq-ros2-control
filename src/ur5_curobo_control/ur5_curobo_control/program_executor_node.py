@@ -47,7 +47,8 @@ from curobo.util_file import load_yaml
 
 # Import the program parser
 from ur5_curobo_control.program_parser import (
-    ProgramParser, RobotInstruction, InstructionType
+    ProgramParser, RobotInstruction, InstructionType,
+    NamedPositionsParser, NamedPosition, PositionType
 )
 
 # Import Robotiq gripper action
@@ -191,10 +192,24 @@ class UR5ProgramExecutorNode(Node):
         ]
         self.current_joint_state: Optional[torch.Tensor] = None
         
+        # Gripper state tracking (0.0 = open, 1.0 = closed)
+        self.gripper_state: float = 0.0  # Assume open at startup
+        
+        # Named positions (loaded from config)
+        self.named_positions: dict = {}  # name -> NamedPosition
+        self._load_named_positions()
+        
+        # Sub-program recursion guard (max depth)
+        self.max_sub_program_depth = 10
+        self.current_sub_program_depth = 0
+        
         # ROS Interfaces
         self._setup_subscribers()
         self._setup_publishers()
         self._setup_services()
+        
+        # Parameter change callback so external speed changes take effect
+        self.add_on_set_parameters_callback(self._on_parameter_change)
         
         # Execution timer (disabled by default)
         self.execution_timer = None
@@ -220,6 +235,16 @@ class UR5ProgramExecutorNode(Node):
             self.get_logger().info("Presenter control enabled - press [Next/PageDown/Right/Space] to start/restart program")
         
         self.get_logger().info("UR5 Program Executor Node initialized")
+    
+    def _on_parameter_change(self, params):
+        """Callback when parameters are changed externally (e.g. via API)."""
+        from rcl_interfaces.msg import SetParametersResult
+        for param in params:
+            if param.name == 'default_speed':
+                new_speed = max(0.01, min(1.0, param.value))
+                self.speed_factor = new_speed
+                self.get_logger().info(f"Speed updated externally to {new_speed:.2f}")
+        return SetParametersResult(successful=True)
     
     def _auto_load_program(self, program_file: str):
         """Auto-load a program file at startup."""
@@ -1056,7 +1081,11 @@ class UR5ProgramExecutorNode(Node):
         return response
     
     def execution_step(self):
-        """Execute the next instruction in the program."""
+        """Execute the next instruction in the program.
+        
+        Handles conditional blocks (if/else/endif) by evaluating conditions
+        and skipping instructions in false branches.
+        """
         if self.state != ExecutorState.EXECUTING:
             return
         
@@ -1079,6 +1108,29 @@ class UR5ProgramExecutorNode(Node):
             return
         
         instruction = self.current_program[self.current_instruction_idx]
+        
+        # Handle conditional blocks
+        if instruction.type == InstructionType.IF:
+            condition_result = self._evaluate_condition(instruction)
+            self.get_logger().info(f"Evaluating [{self.current_instruction_idx + 1}/{len(self.current_program)}]: {instruction.raw_line} => {condition_result}")
+            if not condition_result:
+                # Skip to matching else or endif
+                self._skip_to_else_or_endif()
+            else:
+                self.current_instruction_idx += 1
+            return
+        
+        if instruction.type == InstructionType.ELSE:
+            # If we reach ELSE during normal execution, the IF was true,
+            # so skip to the matching ENDIF
+            self._skip_to_endif()
+            return
+        
+        if instruction.type == InstructionType.ENDIF:
+            # Just advance past it
+            self.current_instruction_idx += 1
+            return
+        
         self.get_logger().info(f"Executing [{self.current_instruction_idx + 1}/{len(self.current_program)}]: {instruction.raw_line}")
         
         success = self.execute_instruction(instruction)
@@ -1101,6 +1153,12 @@ class UR5ProgramExecutorNode(Node):
                 return self.execute_move_to_pose(instruction)
             elif instruction.type == InstructionType.MOVE_TO_JOINT:
                 return self.execute_move_to_joint(instruction)
+            elif instruction.type == InstructionType.MOVE_TO_NAMED:
+                return self.execute_move_to_named(instruction)
+            elif instruction.type == InstructionType.MOVE_RELATIVE:
+                return self.execute_move_relative_instruction(instruction)
+            elif instruction.type == InstructionType.RUN_PROGRAM:
+                return self.execute_run_program(instruction)
             elif instruction.type == InstructionType.WAIT:
                 return self.execute_wait(instruction)
             elif instruction.type == InstructionType.OPEN_GRIPPER:
@@ -1112,6 +1170,9 @@ class UR5ProgramExecutorNode(Node):
             elif instruction.type == InstructionType.SET_SPEED:
                 self.speed_factor = instruction.speed_factor
                 self.get_logger().info(f"Speed set to {self.speed_factor}")
+                return True
+            elif instruction.type in (InstructionType.IF, InstructionType.ELSE, InstructionType.ENDIF):
+                # Conditionals are handled by execution_step, not here
                 return True
             else:
                 self.get_logger().warn(f"Skipping unknown instruction: {instruction.raw_line}")
@@ -1212,6 +1273,9 @@ class UR5ProgramExecutorNode(Node):
         # So we invert: position 0 (open) -> 0.085, position 1 (closed) -> 0.0
         robotiq_position = (1.0 - position) * 0.085
         
+        # Track gripper state for conditional logic
+        self.gripper_state = position
+        
         if self.use_fake_hardware:
             # Fake hardware - publish to visualization topic for RViz animation
             viz_msg = Float64()
@@ -1275,6 +1339,331 @@ class UR5ProgramExecutorNode(Node):
             return False
         return True
     
+    # =================================================================
+    # New instruction execution methods
+    # =================================================================
+    
+    def _load_named_positions(self):
+        """Load named positions from config file."""
+        config_dir = None
+        if self.programs_dir:
+            config_dir = os.path.join(os.path.dirname(self.programs_dir), 'config')
+        if not config_dir or not os.path.isdir(config_dir):
+            workspace_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            config_dir = os.path.join(workspace_root, 'src', 'ur5_curobo_control', 'config')
+        
+        np_file = os.path.join(config_dir, 'named_positions.txt') if config_dir else None
+        if not np_file or not os.path.exists(np_file):
+            self.get_logger().warn(f"Named positions file not found (looked in {config_dir})")
+            return
+        
+        parser = NamedPositionsParser()
+        positions = parser.parse_file(np_file)
+        self.named_positions = {p.name.lower(): p for p in positions}
+        self.get_logger().info(f"Loaded {len(self.named_positions)} named positions: {', '.join(self.named_positions.keys())}")
+    
+    def execute_move_to_named(self, instruction: RobotInstruction) -> bool:
+        """Execute a move to a named position from named_positions.txt."""
+        name = instruction.named_position
+        if not name:
+            self.get_logger().error("movetonamed: no position name specified")
+            return False
+        
+        pos = self.named_positions.get(name.lower())
+        if pos is None:
+            # Reload in case positions were added at runtime
+            self._load_named_positions()
+            pos = self.named_positions.get(name.lower())
+        
+        if pos is None:
+            self.get_logger().error(f"movetonamed: named position '{name}' not found")
+            return False
+        
+        self.get_logger().info(f"Moving to named position: {pos.name} ({pos.position_type.name})")
+        
+        if pos.position_type == PositionType.JOINT:
+            # Create a synthetic MOVE_TO_JOINT instruction
+            synth = RobotInstruction(
+                type=InstructionType.MOVE_TO_JOINT,
+                line_number=instruction.line_number,
+                raw_line=f"movetonamed({name}) -> movetojoint",
+                joint_positions=list(pos.joint_positions)
+            )
+            return self.execute_move_to_joint(synth)
+        
+        elif pos.position_type == PositionType.POSE:
+            # Create a synthetic MOVE_TO_POSE instruction
+            synth = RobotInstruction(
+                type=InstructionType.MOVE_TO_POSE,
+                line_number=instruction.line_number,
+                raw_line=f"movetonamed({name}) -> movetopose",
+                pose=(list(pos.position), list(pos.quaternion))
+            )
+            return self.execute_move_to_pose(synth)
+        
+        self.get_logger().error(f"movetonamed: unknown position type for '{name}'")
+        return False
+    
+    def execute_move_relative_instruction(self, instruction: RobotInstruction) -> bool:
+        """Execute a relative Cartesian move from a program instruction."""
+        if instruction.relative_move is None:
+            return False
+        
+        direction, distance = instruction.relative_move
+        
+        direction_map = {
+            'left':    [0.0, +1.0, 0.0],
+            'right':   [0.0, -1.0, 0.0],
+            'forward': [+1.0, 0.0, 0.0],
+            'back':    [-1.0, 0.0, 0.0],
+            'up':      [0.0, 0.0, +1.0],
+            'down':    [0.0, 0.0, -1.0],
+        }
+        
+        if direction not in direction_map:
+            self.get_logger().error(f"moverelative: unknown direction '{direction}'")
+            return False
+        
+        offset = [d * distance for d in direction_map[direction]]
+        
+        try:
+            # Get current EE pose via FK
+            kin_state = self.motion_gen.kinematics.get_state(
+                self.current_joint_state.view(1, -1)
+            )
+            ee_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
+            ee_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
+            
+            target_pos = [ee_pos[i] + offset[i] for i in range(3)]
+            
+            self.get_logger().info(
+                f"Relative move: {direction} {distance:.3f}m  "
+                f"from [{ee_pos[0]:.4f}, {ee_pos[1]:.4f}, {ee_pos[2]:.4f}] "
+                f"to [{target_pos[0]:.4f}, {target_pos[1]:.4f}, {target_pos[2]:.4f}]"
+            )
+            
+            target_pose = CuroboPose(
+                position=torch.tensor(target_pos, device=self.tensor_args.device, dtype=self.tensor_args.dtype),
+                quaternion=torch.tensor(ee_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
+            )
+            start_state = CuroboJointState.from_position(self.current_joint_state.view(1, -1))
+            
+            result = self.motion_gen.plan_single(
+                start_state, target_pose,
+                MotionGenPlanConfig(enable_graph=False, timeout=5.0)
+            )
+            
+            if result.success.item():
+                traj = result.get_interpolated_plan()
+                self.publish_trajectory(traj)
+                traj_duration = self.estimate_trajectory_duration(traj)
+                if self._stop_event.wait(timeout=traj_duration + 0.5):
+                    self.get_logger().info("Relative move interrupted by stop/pause")
+                    return False
+                return True
+            else:
+                self.get_logger().error(f"Relative move planning failed: {result.status}")
+                return False
+        except Exception as e:
+            self.get_logger().error(f"Error in moverelative: {e}")
+            return False
+    
+    def execute_run_program(self, instruction: RobotInstruction) -> bool:
+        """Execute a sub-program from a .prog file.
+        
+        Parses the sub-program and inserts its instructions into the
+        current program at the current position, replacing the runprogram
+        instruction. This allows programs to call other programs.
+        """
+        filename = instruction.sub_program
+        if not filename:
+            self.get_logger().error("runprogram: no filename specified")
+            return False
+        
+        # Guard against infinite recursion
+        self.current_sub_program_depth += 1
+        if self.current_sub_program_depth > self.max_sub_program_depth:
+            self.get_logger().error(f"runprogram: max recursion depth ({self.max_sub_program_depth}) exceeded")
+            self.current_sub_program_depth -= 1
+            return False
+        
+        # Build full path
+        if not os.path.isabs(filename):
+            if self.programs_dir:
+                filepath = os.path.join(self.programs_dir, filename)
+            else:
+                filepath = filename
+        else:
+            filepath = filename
+        
+        if not os.path.exists(filepath):
+            self.get_logger().error(f"runprogram: file not found: {filepath}")
+            self.current_sub_program_depth -= 1
+            return False
+        
+        try:
+            sub_parser = ProgramParser()
+            sub_instructions = sub_parser.parse_file(filepath)
+            errors = sub_parser.get_errors()
+            if errors:
+                self.get_logger().warn(f"Sub-program parse warnings: {errors}")
+            
+            self.get_logger().info(f"Running sub-program: {filename} ({len(sub_instructions)} instructions)")
+            
+            # Insert sub-program instructions right after the current runprogram instruction
+            insert_idx = self.current_instruction_idx + 1
+            for i, sub_inst in enumerate(sub_instructions):
+                self.current_program.insert(insert_idx + i, sub_inst)
+            
+            self.get_logger().info(f"Inserted {len(sub_instructions)} instructions from {filename}")
+            self.current_sub_program_depth -= 1
+            return True
+            
+        except Exception as e:
+            self.get_logger().error(f"Error loading sub-program {filename}: {e}")
+            self.current_sub_program_depth -= 1
+            return False
+    
+    # =================================================================
+    # Conditional logic helpers
+    # =================================================================
+    
+    def _evaluate_condition(self, instruction: RobotInstruction) -> bool:
+        """Evaluate a conditional instruction and return True/False.
+        
+        Supports:
+          - gripper_open: True if gripper is open (state < 0.5)
+          - gripper_closed: True if gripper is closed (state >= 0.5)
+          - near(PositionName, tolerance): True if robot is near the named position
+          - not_near(PositionName, tolerance): True if robot is NOT near the named position
+        """
+        cond_type = instruction.condition_type
+        
+        if cond_type == 'gripper_open':
+            result = self.gripper_state < 0.5
+            self.get_logger().info(f"Condition gripper_open: gripper_state={self.gripper_state:.2f} => {result}")
+            return result
+        
+        elif cond_type == 'gripper_closed':
+            result = self.gripper_state >= 0.5
+            self.get_logger().info(f"Condition gripper_closed: gripper_state={self.gripper_state:.2f} => {result}")
+            return result
+        
+        elif cond_type in ('near', 'not_near'):
+            target_name = instruction.condition_target
+            tolerance = instruction.condition_tolerance if instruction.condition_tolerance is not None else 0.1  # default 0.1 rad (~5.7 deg)
+            
+            if not target_name:
+                self.get_logger().error(f"Condition {cond_type}: no target position name")
+                return False
+            
+            pos = self.named_positions.get(target_name.lower())
+            if pos is None:
+                self._load_named_positions()
+                pos = self.named_positions.get(target_name.lower())
+            
+            if pos is None:
+                self.get_logger().error(f"Condition {cond_type}: named position '{target_name}' not found")
+                return False
+            
+            is_near = self._is_near_position(pos, tolerance)
+            result = is_near if cond_type == 'near' else not is_near
+            self.get_logger().info(f"Condition {cond_type}({target_name}, {tolerance:.3f}): is_near={is_near} => {result}")
+            return result
+        
+        self.get_logger().error(f"Unknown condition type: {cond_type}")
+        return False
+    
+    def _is_near_position(self, pos: 'NamedPosition', tolerance: float) -> bool:
+        """Check if the robot is near a named position.
+        
+        For joint positions: checks max absolute joint difference.
+        For Cartesian poses: checks Euclidean distance of end-effector.
+        """
+        if self.current_joint_state is None:
+            return False
+        
+        current = self.current_joint_state.cpu().numpy()
+        
+        if pos.position_type == PositionType.JOINT:
+            target = np.array(pos.joint_positions)
+            max_diff = np.max(np.abs(current - target))
+            self.get_logger().debug(f"Near check (joint): max_diff={max_diff:.4f} tolerance={tolerance:.4f}")
+            return max_diff < tolerance
+        
+        elif pos.position_type == PositionType.POSE:
+            # Compare end-effector positions
+            try:
+                kin_state = self.motion_gen.kinematics.get_state(
+                    self.current_joint_state.view(1, -1)
+                )
+                ee_pos = kin_state.ee_position.squeeze().cpu().numpy()
+                target_pos = np.array(pos.position)
+                dist = np.linalg.norm(ee_pos - target_pos)
+                self.get_logger().debug(f"Near check (pose): dist={dist:.4f} tolerance={tolerance:.4f}")
+                return dist < tolerance
+            except Exception as e:
+                self.get_logger().error(f"FK error in near check: {e}")
+                return False
+        
+        return False
+    
+    def _skip_to_else_or_endif(self):
+        """Skip instructions until a matching ELSE or ENDIF at the same nesting level.
+        
+        If ELSE is found, execution continues from the instruction after ELSE.
+        If ENDIF is found, execution continues from the instruction after ENDIF.
+        """
+        depth = 1
+        idx = self.current_instruction_idx + 1
+        while idx < len(self.current_program):
+            inst = self.current_program[idx]
+            if inst.type == InstructionType.IF:
+                depth += 1
+            elif inst.type == InstructionType.ENDIF:
+                depth -= 1
+                if depth == 0:
+                    # Skip past the endif
+                    self.current_instruction_idx = idx + 1
+                    return
+            elif inst.type == InstructionType.ELSE and depth == 1:
+                # Found matching else — continue executing from after else
+                self.current_instruction_idx = idx + 1
+                return
+            idx += 1
+        
+        # No matching endif found — skip to end of program
+        self.get_logger().warn("No matching endif found for if block")
+        self.current_instruction_idx = len(self.current_program)
+    
+    def _skip_to_endif(self):
+        """Skip instructions until a matching ENDIF at the same nesting level.
+        
+        Used when the IF condition was true and we hit the ELSE block —
+        we need to skip all the else-branch instructions.
+        """
+        depth = 1
+        idx = self.current_instruction_idx + 1
+        while idx < len(self.current_program):
+            inst = self.current_program[idx]
+            if inst.type == InstructionType.IF:
+                depth += 1
+            elif inst.type == InstructionType.ENDIF:
+                depth -= 1
+                if depth == 0:
+                    # Skip past the endif
+                    self.current_instruction_idx = idx + 1
+                    return
+            idx += 1
+        
+        # No matching endif found
+        self.get_logger().warn("No matching endif found for else block")
+        self.current_instruction_idx = len(self.current_program)
+    
+    # =================================================================
+    # Trajectory and robot control
+    # =================================================================
+
     def publish_trajectory(self, traj_input):
         """Publish trajectory to robot controller."""
         traj_msg = JointTrajectory()

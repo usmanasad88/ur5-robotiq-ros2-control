@@ -1,0 +1,80 @@
+# ============================================
+# Conditional Logic Demo
+# ============================================
+# Demonstrates if/else/endif conditional blocks.
+#
+# Shows how to:
+#   - Check gripper state before acting
+#   - Check robot proximity to named positions
+#   - Use else branches for alternative actions
+# ============================================
+
+set_speed(0.5)
+
+# -----------------------------------------
+# Example 1: Gripper state check
+# -----------------------------------------
+# If gripper is open, close it; otherwise open it (toggle)
+if gripper_open
+  closegripper
+  wait(0.5)
+else
+  opengripper
+  wait(0.5)
+endif
+
+# -----------------------------------------
+# Example 2: Position proximity check
+# -----------------------------------------
+# If robot is already near Home, skip the move
+if near(Home)
+  wait(0.1)
+else
+  movetonamed(Home)
+  wait(1.0)
+endif
+
+# -----------------------------------------
+# Example 3: Ensure safe state before operation
+# -----------------------------------------
+# Make sure gripper is open before picking
+if gripper_closed
+  opengripper
+  wait(0.5)
+endif
+
+# Make sure we're at home before starting a pick
+if not_near(Home, 0.15)
+  movetonamed(Home)
+  wait(0.5)
+endif
+
+# Now do the pick
+movetonamed(Above_Bottle_Resin_Storage)
+wait(0.3)
+movetonamed(Bottle_Resin_Storage)
+wait(0.3)
+closegripper
+wait(1.0)
+
+# Lift and go home
+movetonamed(Above_Bottle_Resin_Storage)
+wait(0.3)
+movetonamed(Home)
+wait(0.5)
+
+# Place at workspace
+movetonamed(Bottle_Resin_Workspace)
+wait(0.3)
+opengripper
+wait(0.5)
+
+# Small retreat
+moverelative(up, 0.05)
+wait(0.3)
+
+# Return home
+movetonamed(Home)
+wait(0.5)
+
+# Done!

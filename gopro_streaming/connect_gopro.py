@@ -38,8 +38,15 @@ class GoProUSBController:
     USB_INTERFACE_PATTERN = r"enx[0-9a-f]{12}"
     TARGET_INTERFACE = "enx04574796c048"  # Specific interface from user
     
+    # GoPro serial number (from dmesg: usb 3-4: SerialNumber: C3524224505970)
+    # Per Open GoPro HTTP spec, USB IP = 172.2X.1YZ.51 where XYZ = last 3 digits of serial
+    CAMERA_SERIAL = "C3524224505970"
+    
     # Common camera IP patterns (usually .51, .50, or .1 in the subnet)
     CAMERA_IP_CANDIDATES = [51, 50, 1, 2]
+    
+    # GoPro HTTP API port (per Open GoPro spec)
+    HTTP_PORT = 8080
     
     # UDP stream configuration
     UDP_PORT = 8554
@@ -123,9 +130,74 @@ class GoProUSBController:
             print(f"⚠ Error getting subnet for {interface}: {e}")
             return None
     
+    @staticmethod
+    def derive_ip_from_serial(serial: str) -> str:
+        """
+        Derive GoPro USB IP from serial number per Open GoPro HTTP spec.
+        
+        Per spec: USB IP = 172.2X.1YZ.51 where XYZ = last 3 digits of serial.
+        E.g., serial C3524224505970 -> XYZ=970 -> 172.29.170.51
+        
+        Args:
+            serial: Camera serial number string
+            
+        Returns:
+            Derived IP address string
+        """
+        last3 = serial[-3:]  # e.g., "970"
+        x = last3[0]   # "9"
+        yz = last3[1:]  # "70"
+        return f"172.2{x}.1{yz}.51"
+    
+    def ensure_interface_ip(self, interface: str, camera_ip: str) -> bool:
+        """
+        Ensure the host interface has an IP in the same subnet as the camera.
+        If no IP is assigned, automatically assign one.
+        
+        Args:
+            interface: Network interface name
+            camera_ip: Expected camera IP address
+            
+        Returns:
+            True if interface has (or was given) an appropriate IP
+        """
+        subnet = self.get_interface_subnet(interface)
+        if subnet:
+            return True
+        
+        # No IP assigned - derive host IP from camera IP (use .50 in same subnet)
+        parts = camera_ip.split('.')
+        host_ip = f"{parts[0]}.{parts[1]}.{parts[2]}.50"
+        print(f"   ⚙ No IP on interface, assigning {host_ip}/24...")
+        try:
+            result = subprocess.run(
+                ["sudo", "ip", "addr", "add", f"{host_ip}/24", "dev", interface],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                print(f"   ✓ Assigned {host_ip}/24 to {interface}")
+                return True
+            elif "RTNETLINK answers: File exists" in result.stderr:
+                print(f"   ✓ IP already assigned")
+                return True
+            else:
+                print(f"   ❌ Failed to assign IP: {result.stderr.strip()}")
+                print(f"   💡 Run manually: sudo ip addr add {host_ip}/24 dev {interface}")
+                return False
+        except Exception as e:
+            print(f"   ❌ Error assigning IP: {e}")
+            return False
+    
     def detect_camera_ip(self) -> Optional[str]:
         """
         Detect GoPro camera IP address from USB interface.
+        
+        Strategy:
+        1. If IP specified via --ip, use that
+        2. Derive IP from camera serial number (per Open GoPro spec)
+        3. Fall back to scanning common IPs on the interface subnet
         
         Returns:
             Camera IP address or None if not found
@@ -153,35 +225,45 @@ class GoProUSBController:
         
         print(f"   ✓ Found USB interface: {self.interface}")
         
-        # Get subnet from interface
+        # Strategy 1: Derive IP from serial number (most reliable)
+        serial_ip = self.derive_ip_from_serial(self.CAMERA_SERIAL)
+        print(f"   📋 Serial-derived IP: {serial_ip} (from serial {self.CAMERA_SERIAL})")
+        
+        # Ensure interface has an IP in the correct subnet
+        self.ensure_interface_ip(self.interface, serial_ip)
+        
+        print(f"   Testing {serial_ip}:{self.HTTP_PORT}...", end=" ")
+        if self._test_camera_connection(serial_ip):
+            print("✓ FOUND!")
+            self.ip = serial_ip
+            self.base_url = f"http://{serial_ip}:{self.HTTP_PORT}"
+            return serial_ip
+        else:
+            print("✗")
+        
+        # Strategy 2: Try scanning the interface subnet
         subnet = self.get_interface_subnet(self.interface)
-        if not subnet:
-            print(f"   ❌ Could not determine subnet for {self.interface}")
-            return None
-        
-        print(f"   ✓ Interface subnet: {subnet}")
-        
-        # Generate candidate IPs based on common GoPro patterns
-        candidate_ips = []
-        base_ip = str(subnet.network_address)
-        parts = base_ip.split('.')
-        
-        for last_octet in self.CAMERA_IP_CANDIDATES:
-            candidate_ip = f"{parts[0]}.{parts[1]}.{parts[2]}.{last_octet}"
-            candidate_ips.append(candidate_ip)
-        
-        print(f"   Scanning candidate IPs...")
-        
-        # Test each candidate
-        for candidate_ip in candidate_ips:
-            print(f"      {candidate_ip}...", end=" ")
-            if self._test_camera_connection(candidate_ip):
-                print("✓ FOUND!")
-                self.ip = candidate_ip
-                self.base_url = f"http://{candidate_ip}"
-                return candidate_ip
-            else:
-                print("✗")
+        if subnet:
+            print(f"   ✓ Interface subnet: {subnet}")
+            candidate_ips = []
+            base_ip = str(subnet.network_address)
+            parts = base_ip.split('.')
+            
+            for last_octet in self.CAMERA_IP_CANDIDATES:
+                candidate_ip = f"{parts[0]}.{parts[1]}.{parts[2]}.{last_octet}"
+                if candidate_ip != serial_ip:  # Don't re-test serial IP
+                    candidate_ips.append(candidate_ip)
+            
+            print(f"   Scanning candidate IPs...")
+            for candidate_ip in candidate_ips:
+                print(f"      {candidate_ip}:{self.HTTP_PORT}...", end=" ")
+                if self._test_camera_connection(candidate_ip):
+                    print("✓ FOUND!")
+                    self.ip = candidate_ip
+                    self.base_url = f"http://{candidate_ip}:{self.HTTP_PORT}"
+                    return candidate_ip
+                else:
+                    print("✗")
         
         print("\n   ❌ Could not detect camera on any candidate IP")
         return None
@@ -198,7 +280,7 @@ class GoProUSBController:
         """
         try:
             response = requests.get(
-                f"http://{ip}/gopro/camera/state",
+                f"http://{ip}:{self.HTTP_PORT}/gopro/camera/state",
                 timeout=2
             )
             return response.status_code == 200
@@ -288,10 +370,11 @@ class GoProUSBController:
                 print(f"   ⚠ Wired USB control status: {response.status_code}")
             
             # Start webcam/stream
+            # Per Open GoPro spec, for USB: disable wired_usb control before webcam commands
             endpoints = [
-                "/gopro/camera/stream/start",  # Works on GoPro Max 2
                 "/gopro/webcam/start",
                 "/gopro/webcam/preview",
+                "/gopro/camera/stream/start",  # Preview stream alternative
             ]
             
             success = False
@@ -370,12 +453,12 @@ class GoProUSBController:
         Returns:
             UDP URL string
         """
-        # GoPro streams to the camera IP, not localhost
-        return f"udp://{self.ip}:{self.UDP_PORT}"
+        # GoPro webcam streams to the host via UDP on port 8554
+        return f"udp://@:{self.UDP_PORT}"
 
 
 def check_interface_status(interface: str = "enx04574796c048"):
-    """Check if the target interface is up and has an IP."""
+    """Check if the target interface is up and has an IP. Auto-assign if needed."""
     print(f"\n🔌 Checking interface status: {interface}")
     try:
         result = subprocess.run(
@@ -402,8 +485,11 @@ def check_interface_status(interface: str = "enx04574796c048"):
             if match:
                 print(f"   ✓ IP Address: {match.group(1)}/{match.group(2)}")
         else:
-            print("   ❌ No IPv4 address assigned")
-            return False
+            print("   ⚠ No IPv4 address assigned (will auto-assign during detection)")
+        
+        # Show expected camera IP from serial
+        serial_ip = GoProUSBController.derive_ip_from_serial(GoProUSBController.CAMERA_SERIAL)
+        print(f"   📋 Expected camera IP (from serial): {serial_ip}:{GoProUSBController.HTTP_PORT}")
         
         return True
         

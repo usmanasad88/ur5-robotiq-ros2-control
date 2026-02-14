@@ -1,0 +1,84 @@
+# ============================================
+# Smart Pick Resin Bottle (Extended Syntax)
+# ============================================
+# Demonstrates the new program features:
+#   - movetonamed()   : Named positions from config
+#   - moverelative()  : Relative Cartesian offsets
+#   - if/else/endif   : Conditional logic
+#   - runprogram()    : Sub-program execution
+#
+# This program intelligently picks the resin bottle:
+#   1. Ensures robot is at Home (only moves if not already there)
+#   2. Ensures gripper is open before approaching
+#   3. Uses named positions instead of hardcoded joint values
+#   4. Uses relative moves for fine adjustments
+# ============================================
+
+set_speed(0.5)
+
+# -----------------------------------------
+# Phase 1: Ensure we start from Home
+# -----------------------------------------
+# Only move to Home if not already near it
+if not_near(Home, 0.15)
+  movetonamed(Home)
+  wait(1.0)
+endif
+
+# -----------------------------------------
+# Phase 2: Ensure gripper is open
+# -----------------------------------------
+if gripper_closed
+  opengripper
+  wait(0.5)
+endif
+
+# -----------------------------------------
+# Phase 3: Move to resin bottle storage
+# -----------------------------------------
+movetonamed(Above_Bottle_Resin_Storage)
+wait(0.5)
+
+movetonamed(Bottle_Resin_Storage)
+wait(0.3)
+
+# -----------------------------------------
+# Phase 4: Grasp the bottle
+# -----------------------------------------
+closegripper
+wait(1.0)
+
+# -----------------------------------------
+# Phase 5: Lift up and return home via named positions
+# -----------------------------------------
+movetonamed(Above_Bottle_Resin_Storage)
+wait(0.5)
+
+movetonamed(Home)
+wait(0.5)
+
+# -----------------------------------------
+# Phase 6: Move to workspace position
+# -----------------------------------------
+movetonamed(Bottle_Resin_Workspace)
+wait(0.3)
+
+# -----------------------------------------
+# Phase 7: Release bottle
+# -----------------------------------------
+opengripper
+wait(0.5)
+
+# -----------------------------------------
+# Phase 8: Small retreat using relative motion
+# -----------------------------------------
+moverelative(up, 0.05)
+wait(0.3)
+
+# -----------------------------------------
+# Phase 9: Return home
+# -----------------------------------------
+movetonamed(Home)
+wait(0.5)
+
+# Done! Resin bottle is at workspace position.

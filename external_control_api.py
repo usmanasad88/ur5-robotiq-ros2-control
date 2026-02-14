@@ -276,6 +276,35 @@ class ROSBridge:
             return False, "move_relative service timeout"
         return res.success, res.message
 
+    def set_speed(self, speed: float):
+        """Set the executor speed factor (0.0-1.0)."""
+        speed = max(0.01, min(1.0, speed))
+        ok = self.set_parameter("default_speed", speed, ParameterType.PARAMETER_DOUBLE)
+        if not ok:
+            return False, "Failed to set speed parameter"
+        return True, f"Speed set to {speed:.2f}"
+
+    def get_speed(self) -> float | None:
+        """Read the current speed factor from the executor node."""
+        if not ROS_AVAILABLE or self.node is None:
+            return None
+        try:
+            from rcl_interfaces.srv import GetParameters
+            cli = self.node.create_client(GetParameters, "/ur5_program_executor/get_parameters")
+            if not cli.wait_for_service(timeout_sec=1.0):
+                return None
+            req = GetParameters.Request()
+            req.names = ["default_speed"]
+            future = cli.call_async(req)
+            end = time.time() + 2.0
+            while not future.done() and time.time() < end:
+                time.sleep(0.02)
+            if future.done() and future.result() and future.result().values:
+                return future.result().values[0].double_value
+        except Exception:
+            pass
+        return None
+
     def get_joint_state_dict(self) -> dict | None:
         js = self.latest_joint_state
         if js is None:
@@ -348,6 +377,8 @@ def get_available_commands() -> dict[str, Any]:
         "gripper_actions": ["open", "close", "position"],
         "execution_control": ["pause", "resume", "stop"],
         "relative_directions": ["left", "right", "forward", "back", "up", "down"],
+        "speed": {"min": 0.01, "max": 1.0, "default": 0.5,
+                  "description": "Velocity scaling factor (0.01-1.0). Use POST /api/speed to change."},
     }
 
     # Programs
@@ -424,10 +455,12 @@ def api_status():
         "ros_available": ROS_AVAILABLE,
         "joint_state": None,
         "gripper_state": None,
+        "speed": None,
     }
     if bridge:
         data["joint_state"] = bridge.get_joint_state_dict()
         data["gripper_state"] = bridge.get_gripper_state_dict()
+        data["speed"] = bridge.get_speed()
     return jsonify(data)
 
 
@@ -638,6 +671,40 @@ def api_position_save():
         return _err("'type' must be 'joint' or 'pose'")
     ok, msg = bridge.save_position(name, pos_type)
     return (_ok(msg, name=name, type=pos_type) if ok else _err(msg))
+
+
+# ---------- speed control -------------------------------------------------
+
+@app.route("/api/speed", methods=["GET", "POST"])
+def api_speed():
+    """Get or set the robot speed factor.
+
+    GET  → returns current speed
+    POST → sets speed
+      Body: {"speed": 0.3}
+    """
+    if bridge is None:
+        return _err("ROS bridge not initialised", 503)
+
+    if flask_request.method == "GET":
+        spd = bridge.get_speed()
+        if spd is None:
+            return _err("Could not read speed from executor")
+        return _ok(f"Current speed: {spd:.2f}", speed=spd)
+
+    # POST
+    body = flask_request.get_json(silent=True) or {}
+    speed = body.get("speed")
+    if speed is None:
+        return _err("Missing 'speed' field (0.01 – 1.0)")
+    try:
+        speed = float(speed)
+    except (TypeError, ValueError):
+        return _err("'speed' must be a number (0.01 – 1.0)")
+    if speed < 0.01 or speed > 1.0:
+        return _err("'speed' must be between 0.01 and 1.0")
+    ok, msg = bridge.set_speed(speed)
+    return (_ok(msg, speed=speed) if ok else _err(msg))
 
 
 # ═══════════════════════════════════════════════════════════════════════════

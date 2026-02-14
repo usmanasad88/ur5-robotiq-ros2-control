@@ -5,12 +5,22 @@ Robot Program Parser for UR5 Control
 Parses program files with robot instructions like:
   - movetopose([x, y, z], [qw, qx, qy, qz])
   - movetojoint([j1, j2, j3, j4, j5, j6])  # Joint angles in DEGREES
+  - movetonamed(PositionName)                # Named position from config
+  - moverelative(direction, distance)         # Relative Cartesian move
+  - runprogram(filename.prog)                 # Execute another .prog file
   - wait(seconds)
   - opengripper
   - closegripper
   - gripper(position)  # 0.0 = open, 1.0 = closed
-  - # comments are ignored
   - set_speed(factor)  # 0.0-1.0 velocity scaling
+  - # comments are ignored
+
+  Conditional blocks:
+    if gripper_open / if gripper_closed
+    if near(PositionName) / if near(PositionName, tolerance)
+    if not_near(PositionName) / if not_near(PositionName, tolerance)
+    else
+    endif
 
 Note: Joint angles in program files and named_positions.txt are specified
       in DEGREES and automatically converted to radians by the parser.
@@ -25,6 +35,12 @@ from enum import Enum, auto
 class InstructionType(Enum):
     MOVE_TO_POSE = auto()
     MOVE_TO_JOINT = auto()
+    MOVE_TO_NAMED = auto()
+    MOVE_RELATIVE = auto()
+    RUN_PROGRAM = auto()
+    IF = auto()
+    ELSE = auto()
+    ENDIF = auto()
     WAIT = auto()
     OPEN_GRIPPER = auto()
     CLOSE_GRIPPER = auto()
@@ -52,6 +68,18 @@ class RobotInstruction:
     speed_factor: Optional[float] = None
     # Comment text
     comment: Optional[str] = None
+    # Named position name (for movetonamed)
+    named_position: Optional[str] = None
+    # Relative move: (direction, distance_meters)
+    relative_move: Optional[Tuple[str, float]] = None
+    # Sub-program filename (for runprogram)
+    sub_program: Optional[str] = None
+    # Condition string (for IF instructions, evaluated at runtime)
+    condition: Optional[str] = None
+    # Condition parameters (parsed from the condition string)
+    condition_type: Optional[str] = None  # 'gripper_open', 'gripper_closed', 'near', 'not_near'
+    condition_target: Optional[str] = None  # position name for near/not_near
+    condition_tolerance: Optional[float] = None  # tolerance in radians for near/not_near
 
 
 class ProgramParser:
@@ -88,6 +116,36 @@ class ProgramParser:
     OPEN_GRIPPER_PATTERN = re.compile(r'opengripper', re.IGNORECASE)
     CLOSE_GRIPPER_PATTERN = re.compile(r'closegripper', re.IGNORECASE)
     COMMENT_PATTERN = re.compile(r'^\s*#(.*)$')
+    
+    # New patterns for extended instructions
+    MOVE_TO_NAMED_PATTERN = re.compile(
+        r'movetonamed\s*\(\s*([\w]+)\s*\)',
+        re.IGNORECASE
+    )
+    
+    MOVE_RELATIVE_PATTERN = re.compile(
+        r'moverelative\s*\(\s*(\w+)\s*(?:,\s*([0-9.]+))?\s*\)',
+        re.IGNORECASE
+    )
+    
+    RUN_PROGRAM_PATTERN = re.compile(
+        r'runprogram\s*\(\s*([\w./-]+)\s*\)',
+        re.IGNORECASE
+    )
+    
+    # Conditional patterns
+    # if gripper_open / if gripper_closed
+    IF_GRIPPER_PATTERN = re.compile(
+        r'^if\s+(gripper_open|gripper_closed)\s*$',
+        re.IGNORECASE
+    )
+    # if near(PositionName) / if near(PositionName, 0.1)
+    IF_NEAR_PATTERN = re.compile(
+        r'^if\s+(near|not_near)\s*\(\s*([\w]+)\s*(?:,\s*([0-9.]+))?\s*\)\s*$',
+        re.IGNORECASE
+    )
+    ELSE_PATTERN = re.compile(r'^else\s*$', re.IGNORECASE)
+    ENDIF_PATTERN = re.compile(r'^endif\s*$', re.IGNORECASE)
     
     def __init__(self):
         self.instructions: List[RobotInstruction] = []
@@ -247,6 +305,88 @@ class ProgramParser:
                 gripper_position=1.0
             )
         
+        # Check for movetonamed(PositionName)
+        match = self.MOVE_TO_NAMED_PATTERN.search(line)
+        if match:
+            name = match.group(1)
+            return RobotInstruction(
+                type=InstructionType.MOVE_TO_NAMED,
+                line_number=line_num,
+                raw_line=line,
+                named_position=name
+            )
+        
+        # Check for moverelative(direction, distance)
+        match = self.MOVE_RELATIVE_PATTERN.search(line)
+        if match:
+            direction = match.group(1).lower()
+            distance = float(match.group(2)) if match.group(2) else 0.05  # default 5cm
+            valid_directions = ['left', 'right', 'forward', 'back', 'up', 'down']
+            if direction not in valid_directions:
+                self.errors.append(f"Line {line_num}: Invalid direction '{direction}'. Use: {', '.join(valid_directions)}")
+                return None
+            return RobotInstruction(
+                type=InstructionType.MOVE_RELATIVE,
+                line_number=line_num,
+                raw_line=line,
+                relative_move=(direction, distance)
+            )
+        
+        # Check for runprogram(filename)
+        match = self.RUN_PROGRAM_PATTERN.search(line)
+        if match:
+            filename = match.group(1)
+            return RobotInstruction(
+                type=InstructionType.RUN_PROGRAM,
+                line_number=line_num,
+                raw_line=line,
+                sub_program=filename
+            )
+        
+        # Check for conditional: if gripper_open / if gripper_closed
+        match = self.IF_GRIPPER_PATTERN.match(line)
+        if match:
+            cond_type = match.group(1).lower()
+            return RobotInstruction(
+                type=InstructionType.IF,
+                line_number=line_num,
+                raw_line=line,
+                condition=line,
+                condition_type=cond_type
+            )
+        
+        # Check for conditional: if near(Name) / if not_near(Name, tolerance)
+        match = self.IF_NEAR_PATTERN.match(line)
+        if match:
+            cond_type = match.group(1).lower()  # 'near' or 'not_near'
+            target_name = match.group(2)
+            tolerance = float(match.group(3)) if match.group(3) else None
+            return RobotInstruction(
+                type=InstructionType.IF,
+                line_number=line_num,
+                raw_line=line,
+                condition=line,
+                condition_type=cond_type,
+                condition_target=target_name,
+                condition_tolerance=tolerance
+            )
+        
+        # Check for else
+        if self.ELSE_PATTERN.match(line):
+            return RobotInstruction(
+                type=InstructionType.ELSE,
+                line_number=line_num,
+                raw_line=line
+            )
+        
+        # Check for endif
+        if self.ENDIF_PATTERN.match(line):
+            return RobotInstruction(
+                type=InstructionType.ENDIF,
+                line_number=line_num,
+                raw_line=line
+            )
+        
         # Unknown instruction
         self.errors.append(f"Line {line_num}: Unknown instruction: {line}")
         return RobotInstruction(
@@ -271,6 +411,18 @@ def validate_program(filepath: str) -> Tuple[bool, List[str]]:
         unknown = [i for i in instructions if i.type == InstructionType.UNKNOWN]
         if unknown:
             errors.extend([f"Unknown instruction at line {i.line_number}" for i in unknown])
+        
+        # Check balanced if/endif blocks
+        if_depth = 0
+        for inst in instructions:
+            if inst.type == InstructionType.IF:
+                if_depth += 1
+            elif inst.type == InstructionType.ENDIF:
+                if_depth -= 1
+                if if_depth < 0:
+                    errors.append(f"Line {inst.line_number}: 'endif' without matching 'if'")
+        if if_depth > 0:
+            errors.append(f"Unmatched 'if' block(s): {if_depth} 'endif' missing")
         
         return len(errors) == 0, errors
     except FileNotFoundError:
@@ -460,34 +612,41 @@ class NamedPositionsParser:
 
 
 if __name__ == '__main__':
-    # Test the parser
+    # Test the parser with extended instruction set
     test_program = """
-# Pick and place demo program
-# Move to home position first
+# Extended program demo - shows new features
 set_speed(0.5)
-movetopose([0.4, 0.0, 0.5], [0.0, 1.0, 0.0, 0.0])
+
+# Conditional: ensure gripper is open before starting
+if gripper_closed
+  opengripper
+  wait(0.5)
+endif
+
+# Move to a named position
+movetonamed(Home)
 wait(1.0)
 
-# Open gripper and approach object
-opengripper
-wait(0.5)
-movetopose([0.4, 0.3, 0.2], [0.0, 0.707, 0.707, 0.0])
+# Conditional: only go home if not already near it
+if not_near(Home, 0.15)
+  movetonamed(Home)
+  wait(0.5)
+endif
 
-# Grasp object
+# Relative motion: nudge the end-effector
+moverelative(left, 0.05)
+wait(0.5)
+moverelative(down, 0.03)
+wait(0.5)
+
+# Run a sub-program
+runprogram(pick_resin_bottle.prog)
+
+# Traditional commands still work
+movetopose([0.4, 0.0, 0.5], [0.0, 1.0, 0.0, 0.0])
 closegripper
 wait(0.5)
-
-# Lift and move to place position
-movetopose([0.4, 0.3, 0.4], [0.0, 0.707, 0.707, 0.0])
-movetopose([0.4, -0.3, 0.4], [0.0, 0.707, 0.707, 0.0])
-
-# Place object
-movetopose([0.4, -0.3, 0.2], [0.0, 0.707, 0.707, 0.0])
 opengripper
-wait(0.5)
-
-# Retreat
-movetopose([0.4, -0.3, 0.4], [0.0, 0.707, 0.707, 0.0])
 """
     
     parser = ProgramParser()
@@ -498,12 +657,22 @@ movetopose([0.4, -0.3, 0.4], [0.0, 0.707, 0.707, 0.0])
         print(f"  Line {inst.line_number}: {inst.type.name}")
         if inst.pose:
             print(f"    Pose: pos={inst.pose[0]}, quat={inst.pose[1]}")
+        if inst.joint_positions is not None:
+            print(f"    Joints: {inst.joint_positions}")
         if inst.wait_duration is not None:
             print(f"    Duration: {inst.wait_duration}s")
         if inst.gripper_position is not None:
             print(f"    Gripper: {inst.gripper_position}")
         if inst.speed_factor is not None:
             print(f"    Speed: {inst.speed_factor}")
+        if inst.named_position is not None:
+            print(f"    Named: {inst.named_position}")
+        if inst.relative_move is not None:
+            print(f"    Relative: {inst.relative_move[0]} {inst.relative_move[1]}m")
+        if inst.sub_program is not None:
+            print(f"    Sub-program: {inst.sub_program}")
+        if inst.condition_type is not None:
+            print(f"    Condition: {inst.condition_type} target={inst.condition_target} tol={inst.condition_tolerance}")
     
     if parser.get_errors():
         print("\nErrors:")

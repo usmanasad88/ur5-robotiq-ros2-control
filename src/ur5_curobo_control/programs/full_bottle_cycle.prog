@@ -1,0 +1,66 @@
+# ============================================
+# Full Bottle Cycle - Composite Program
+# ============================================
+# Demonstrates runprogram() to chain sub-programs.
+#
+# This program:
+#   1. Picks the resin bottle from storage -> workspace
+#   2. Picks the hardener bottle from storage -> workspace
+#   3. Waits for operator (simulate work)
+#   4. Returns the resin bottle to storage
+#   5. Returns the hardener bottle to storage
+# ============================================
+
+set_speed(0.5)
+
+# Ensure we start from a known state
+if not_near(Home, 0.15)
+  movetonamed(Home)
+  wait(0.5)
+endif
+
+if gripper_closed
+  opengripper
+  wait(0.5)
+endif
+
+# -----------------------------------------
+# Step 1: Pick resin bottle to workspace
+# -----------------------------------------
+runprogram(pick_resin_bottle.prog)
+wait(1.0)
+
+# -----------------------------------------
+# Step 2: Pick hardener bottle to workspace
+# -----------------------------------------
+runprogram(pick_hardener_bottle.prog)
+wait(1.0)
+
+# -----------------------------------------
+# Step 3: Simulate work (operator interaction)
+# -----------------------------------------
+# Both bottles are now at workspace positions
+# Wait 5 seconds to simulate work being done
+wait(5.0)
+
+# -----------------------------------------
+# Step 4: Return resin bottle to storage
+# -----------------------------------------
+runprogram(return_resin_bottle.prog)
+wait(1.0)
+
+# -----------------------------------------
+# Step 5: Return hardener bottle to storage
+# -----------------------------------------
+runprogram(return_hardener_bottle.prog)
+wait(1.0)
+
+# -----------------------------------------
+# Finish: ensure robot is home
+# -----------------------------------------
+if not_near(Home, 0.15)
+  movetonamed(Home)
+  wait(0.5)
+endif
+
+# Cycle complete!

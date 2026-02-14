@@ -1,0 +1,42 @@
+# ============================================
+# Relative Motion Demo
+# ============================================
+# Demonstrates relative Cartesian motion commands.
+# The robot traces a small rectangle in task space.
+# ============================================
+
+set_speed(0.3)
+
+# Start at a known position
+movetonamed(Home)
+wait(1.0)
+
+# Move to a good starting pose above the table
+movetonamed(TableCenter)
+wait(0.5)
+
+# Trace a small rectangle: right -> forward -> left -> back
+moverelative(right, 0.08)
+wait(0.5)
+
+moverelative(forward, 0.06)
+wait(0.5)
+
+moverelative(left, 0.08)
+wait(0.5)
+
+moverelative(back, 0.06)
+wait(0.5)
+
+# Small vertical motion: dip down and come back up
+moverelative(down, 0.05)
+wait(0.3)
+
+moverelative(up, 0.05)
+wait(0.3)
+
+# Return home
+movetonamed(Home)
+wait(0.5)
+
+# Demo complete!
