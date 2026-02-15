@@ -208,25 +208,68 @@ class ROSBridge:
         return res.success, res.message
 
     def gripper(self, action: str, position: float | None = None):
-        msg = String()
-        viz_pos = 0.0
+        """Control the physical Robotiq gripper via ros2 action send_goal.
+
+        The /gripper_command_simple topic is only for logging/visualization.
+        The real gripper is driven by the Robotiq action server at
+        /robotiq_2f_urcap_adapter/gripper_command.
+
+        Robotiq 2F-85 mapping:
+            position 0.085 m  →  fully open
+            position 0.0   m  →  fully closed
+        """
+        import subprocess
+
         if action == "open":
-            msg.data = "open"
+            robotiq_pos = 0.085
             viz_pos = 0.0
         elif action == "close":
-            msg.data = "close"
+            robotiq_pos = 0.0
             viz_pos = 0.8
         elif action == "position" and position is not None:
             position = max(0.0, min(1.0, position))
-            msg.data = f"position:{position}"
+            robotiq_pos = (1.0 - position) * 0.085
             viz_pos = position * 0.8
         else:
             return False, f"Unknown gripper action: {action}"
-        self.pub_gripper.publish(msg)
+
+        # Publish visualization so RViz updates immediately
         viz = Float64()
         viz.data = viz_pos
         self.pub_gripper_viz.publish(viz)
-        return True, f"Gripper: {msg.data}"
+
+        # Also publish to the simple topic for logging / program-executor state
+        simple = String()
+        simple.data = action if action in ("open", "close") else f"position:{position}"
+        self.pub_gripper.publish(simple)
+
+        # Drive the physical gripper through the Robotiq action server
+        cmd = (
+            'unset LD_PRELOAD && '
+            'source /opt/ros/humble/setup.bash && '
+            'source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && '
+            'ros2 action send_goal -f /robotiq_2f_urcap_adapter/gripper_command '
+            'robotiq_2f_urcap_adapter/action/GripperCommand '
+            f"'{{command: {{position: {robotiq_pos}, max_effort: 100.0, max_speed: 0.1}}}}'"
+        )
+
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                executable='/bin/bash',
+            )
+            if result.returncode == 0:
+                return True, f"Gripper {action} (pos={robotiq_pos:.3f}m)"
+            else:
+                return False, f"Gripper action failed: {result.stderr.strip()}"
+        except subprocess.TimeoutExpired:
+            return False, "Gripper action timed out"
+        except Exception as e:
+            return False, f"Gripper action error: {e}"
 
     def move_to_joints(self, positions: list[float], duration: float = 3.0):
         if len(positions) != 6:

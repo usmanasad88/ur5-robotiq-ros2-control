@@ -44,11 +44,11 @@ joint Bottle_Hardener_Storage -11.27 -25.22 78.85 136.04 -111.82 0
 joint Bottle_Resin_Workspace 16.25 -7.1 40.43 152.85 -58.29 -5.29
 joint Bottle_Hardener_Workspace 33.15 -18.70 71.4 130 -70 0
 
-joint above_roller_pick_position -21.46 -52.56 79.87 237.85 -93.2 13.86
-joint roller_pick_position -21.46 -45.37 82.28 231.9 -92.95 13.85
+joint above_roller_pick_position -18 -53.68 105.9 126.32 -99.35 0.25 
+joint roller_pick_position -18 -45 105.9 117.89 -99.35 0.25 
 
-joint above_roller_place_position 39.35 -55.65 88.70 233.75 -93 -19.43
-joint roller_place_position 40 -46.79 88.97 225.73 -89.38 -19.34
+joint above_roller_place_position 62.35 -41.45 98.55 121.5 102.14 -0.34
+joint roller_place_position 63 -21.45 88.55 111.5 102.14 -0.34
 
 # ============================================
 # Place Positions
@@ -68,14 +68,3 @@ pose InspectAngled 0.35 0.15 0.35 0.0 0.924 0.383 0.0
 # ============================================
 # Saved at 2026-02-13 07:13:42
 joint position_1 0.0000 -1.5708 1.5708 -1.5708 -1.5708 0.0000
-# Saved at 2026-02-13 07:14:45
-joint position_2 0.0920 -1.0663 0.1838 -0.6883 -1.5708 0.0920
-joint Bottle_R 57.4 -16.8 69.9 122.7 -79.8 0.2
-# Saved at 2026-02-13 13:14:40
-joint resin_pick_position -0.1523 -0.3132 1.0635 2.4337 -2.0346 0.0004
-# Saved at 2026-02-13 14:20:02
-joint new_resin_position -0.3725 -0.2131 0.9005 2.5378 -1.6759 0.0088
-# Saved at 2026-02-14 16:10:39
-joint brush_place_position -0.0299 -0.4545 1.6172 2.6892 -0.6164 -0.6558
-# Saved at 2026-02-14 16:13:37
-joint brush_pick_position -0.4472 -0.8058 1.5151 3.9445 -1.4547 0.1701

@@ -943,7 +943,10 @@ class UR5ProgramExecutorNode(Node):
         
         try:
             joint_values = self.current_joint_state.cpu().numpy().tolist()
-            
+
+            # Joint values from /joint_states are in radians; convert to degrees
+            joint_degrees = [float(np.degrees(v)) for v in joint_values]
+
             if pos_type == "pose":
                 # Use FK to get EE pose
                 kin_state = self.motion_gen.kinematics.get_state(
@@ -955,10 +958,10 @@ class UR5ProgramExecutorNode(Node):
                 line = f"pose {name} {ee_pos[0]:.4f} {ee_pos[1]:.4f} {ee_pos[2]:.4f} {ee_quat[0]:.4f} {ee_quat[1]:.4f} {ee_quat[2]:.4f} {ee_quat[3]:.4f}\n"
                 msg = f"Saved pose '{name}': pos=[{ee_pos[0]:.4f}, {ee_pos[1]:.4f}, {ee_pos[2]:.4f}], quat=[{ee_quat[0]:.4f}, {ee_quat[1]:.4f}, {ee_quat[2]:.4f}, {ee_quat[3]:.4f}]"
             else:
-                # Save as joint position
-                vals_str = ' '.join(f'{v:.4f}' for v in joint_values)
+                # Save as joint position (store degrees)
+                vals_str = ' '.join(f'{v:.4f}' for v in joint_degrees)
                 line = f"joint {name} {vals_str}\n"
-                msg = f"Saved joint position '{name}': [{', '.join(f'{v:.4f}' for v in joint_values)}]"
+                msg = f"Saved joint position '{name}': [{', '.join(f'{v:.4f}' for v in joint_degrees)}]"
             
             # Append to file
             with open(np_file, 'a') as f:
