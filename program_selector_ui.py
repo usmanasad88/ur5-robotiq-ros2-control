@@ -14,6 +14,7 @@ import subprocess
 import os
 import glob
 import time
+import math
 from pathlib import Path
 import signal
 import psutil
@@ -67,7 +68,7 @@ try:
     import rclpy
     from rclpy.node import Node
     from std_srvs.srv import Trigger, SetBool
-    from rcl_interfaces.srv import SetParameters
+    from rcl_interfaces.srv import SetParameters, GetParameters
     from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
     from sensor_msgs.msg import JointState
     from std_msgs.msg import String, Float64
@@ -144,9 +145,11 @@ class ROSProgramController:
         self.move_to_pose_client = self.node.create_client(
             Trigger, '/ur5_program_executor/move_to_pose')
 
-        # Workspace markers parameter client (for live object placement)
+        # Workspace markers parameter clients (for live object placement)
         self.ws_set_params_client = self.node.create_client(
             SetParameters, '/workspace_markers_publisher/set_parameters')
+        self.ws_get_params_client = self.node.create_client(
+            GetParameters, '/workspace_markers_publisher/get_parameters')
         
         # Publishers for direct commands
         self.gripper_pub = self.node.create_publisher(
@@ -412,15 +415,21 @@ class ROSProgramController:
         except Exception as e:
             return False, f"Failed to send gripper command: {e}"
     
-    def set_workspace_marker_params(self, params: dict) -> bool:
+    def set_workspace_marker_params(self, params: dict) -> tuple:
         """Set parameters on the workspace_markers_publisher node.
 
         Args:
             params: dict of {param_name: float_value}
                     e.g. {"table.x": 0.1, "table.yaw": 45.0}
+        Returns:
+            (success: bool, message: str)
         """
         if not ROS_AVAILABLE:
-            return False
+            return False, "ROS not available"
+
+        if not self.ws_set_params_client.service_is_ready():
+            if not self.ws_set_params_client.wait_for_service(timeout_sec=2.0):
+                return False, "Workspace markers node not reachable (service not discovered)"
 
         request = SetParameters.Request()
         for name, value in params.items():
@@ -434,10 +443,91 @@ class ROSProgramController:
 
         future = self.ws_set_params_client.call_async(request)
         if not self._spin_for_future(future, timeout_sec=2.0):
-            return False
+            return False, "Service call timed out (spin lock busy)"
         if future.result() is not None:
-            return all(r.successful for r in future.result().results)
-        return False
+            results = future.result().results
+            if all(r.successful for r in results):
+                return True, "Parameters updated"
+            failed = [n for n, r in zip(params.keys(), results) if not r.successful]
+            return False, f"Failed params: {', '.join(failed)}"
+        return False, "No response from workspace markers node"
+
+    def get_workspace_marker_params(self, object_names, param_keys) -> dict:
+        """Read current parameter values from the workspace_markers_publisher node.
+
+        Returns:
+            dict of {param_name: float_value} or None on failure.
+        """
+        if not ROS_AVAILABLE:
+            return None
+
+        if not self.ws_get_params_client.service_is_ready():
+            if not self.ws_get_params_client.wait_for_service(timeout_sec=2.0):
+                return None
+
+        param_names = []
+        for obj_name in object_names:
+            for key in param_keys:
+                param_names.append(f"{obj_name}.{key}")
+
+        request = GetParameters.Request()
+        request.names = param_names
+
+        future = self.ws_get_params_client.call_async(request)
+        if not self._spin_for_future(future, timeout_sec=2.0):
+            return None
+
+        if future.result() is None:
+            return None
+
+        result = {}
+        for name, pval in zip(param_names, future.result().values):
+            if pval.type == ParameterType.PARAMETER_DOUBLE:
+                result[name] = pval.double_value
+            elif pval.type == ParameterType.PARAMETER_INTEGER:
+                result[name] = float(pval.integer_value)
+        return result
+
+    def save_current_joint_position(self, name: str) -> tuple:
+        """Save the current joint position to named_positions.txt in degrees.
+
+        Returns:
+            (success: bool, message: str)
+        """
+        if not ROS_AVAILABLE:
+            return False, "ROS not available"
+
+        # Spin once to ensure we have the latest joint state
+        self.get_joint_state()
+        joint_state = self.latest_joint_state
+        if joint_state is None or not joint_state.position:
+            return False, "No joint state available"
+
+        if len(joint_state.position) != 6:
+            return False, f"Expected 6 joints, got {len(joint_state.position)}"
+
+        name = name.strip().replace(' ', '_')
+        if not name:
+            return False, "Position name cannot be empty"
+
+        # Convert radians to degrees
+        joint_degrees = [math.degrees(p) for p in joint_state.position]
+
+        # Find named_positions.txt in source tree
+        workspace_root = Path(__file__).parent
+        np_file = workspace_root / "src/ur5_curobo_control/config/named_positions.txt"
+        if not np_file.exists():
+            return False, f"Named positions file not found: {np_file}"
+
+        vals_str = ' '.join(f'{v:.2f}' for v in joint_degrees)
+        line = f"joint {name} {vals_str}\n"
+
+        with open(np_file, 'a') as f:
+            f.write(f"# Saved at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(line)
+
+        summary = ', '.join(f'{v:.1f}' for v in joint_degrees)
+        return True, f"Saved '{name}': [{summary}] deg"
 
     def move_to_joint_positions(self, joint_positions: list, duration: float = 3.0) -> tuple[bool, str]:
         """Move robot to specified joint positions."""
@@ -1267,7 +1357,39 @@ def main():
                                         st.session_state.recorder.log_program_event(f'move_to_pose:{pos.name}', 'named_position')
                                 else:
                                     st.error(msg)
-    
+
+        # --- Save Current Joint Position ---
+        st.markdown("---")
+        st.markdown("**Save Current Joint Position:**")
+
+        # Show current joints (degrees) so user knows what they're saving
+        if st.session_state.controller and ROS_AVAILABLE:
+            joint_state = st.session_state.controller.get_joint_state()
+            if joint_state and joint_state.position and len(joint_state.position) == 6:
+                preview_cols = st.columns(6)
+                for i, (col, rad) in enumerate(zip(preview_cols, joint_state.position)):
+                    col.metric(f"J{i+1}", f"{math.degrees(rad):.1f}\u00b0")
+            else:
+                st.caption("Waiting for joint state...")
+
+        save_col1, save_col2 = st.columns([3, 1])
+        with save_col1:
+            save_name = st.text_input("Position name", key="save_pos_name",
+                                      placeholder="e.g. pick_position")
+        with save_col2:
+            st.markdown("")  # vertical spacer to align with text input
+            if st.button("Save", key="save_joint_pos", type="primary",
+                         use_container_width=True, disabled=not ROS_AVAILABLE):
+                if st.session_state.controller and save_name:
+                    success, msg = st.session_state.controller.save_current_joint_position(save_name)
+                    if success:
+                        st.success(msg)
+                        st.rerun()  # reload to show new position in list
+                    else:
+                        st.error(msg)
+                elif not save_name:
+                    st.warning("Enter a position name first")
+
     with cmd_tab3:
         st.markdown("#### Manual Joint Input")
         st.caption("Enter joint positions in degrees")
@@ -1330,6 +1452,46 @@ def main():
             "table": {"file": "table.glb",      "x": 0.0, "y": -1.0, "z": -0.2, "roll": 90.0, "pitch": 0.0, "yaw": 0.0, "scale_x": 1.0, "scale_y": 1.0, "scale_z": 1.0},
             "base":  {"file": "robot_base.glb",  "x": 0.0, "y":  0.0, "z": -0.1, "roll": 90.0, "pitch": 0.0, "yaw": 0.0, "scale_x": 0.8, "scale_y": 0.8, "scale_z": 0.8},
         }
+        WS_PARAM_KEYS = ["x", "y", "z", "roll", "pitch", "yaw", "scale_x", "scale_y", "scale_z"]
+
+        # Read current values from the ROS node on first load
+        if 'ws_params_initialized' not in st.session_state:
+            st.session_state.ws_params_initialized = False
+
+        # Maps ROS param key suffix -> Streamlit widget key suffix
+        _WS_WIDGET_SUFFIX = {
+            "x": "x", "y": "y", "z": "z",
+            "roll": "roll", "pitch": "pitch", "yaw": "yaw",
+            "scale_x": "sx", "scale_y": "sy", "scale_z": "sz",
+        }
+
+        def _refresh_ws_params_from_ros():
+            """Read live parameter values from workspace_markers_publisher and push them into widget state."""
+            if not st.session_state.controller:
+                return False
+            values = st.session_state.controller.get_workspace_marker_params(
+                WS_OBJECTS.keys(), WS_PARAM_KEYS)
+            if not values:
+                return False
+            for obj_name in WS_OBJECTS:
+                for key in WS_PARAM_KEYS:
+                    param_key = f"{obj_name}.{key}"
+                    if param_key in values:
+                        widget_key = f"ws_{obj_name}_{_WS_WIDGET_SUFFIX[key]}"
+                        st.session_state[widget_key] = values[param_key]
+            st.session_state.ws_params_initialized = True
+            return True
+
+        if not st.session_state.ws_params_initialized:
+            _refresh_ws_params_from_ros()
+
+        # Refresh button
+        if st.button("🔄 Read from ROS", key="ws_refresh", disabled=not ROS_AVAILABLE):
+            if _refresh_ws_params_from_ros():
+                st.success("Values read from workspace markers node")
+            else:
+                st.warning("Could not read from workspace markers node — is it running?")
+            st.rerun()
 
         for obj_name, defaults in WS_OBJECTS.items():
             with st.expander(f"{obj_name}  ({defaults['file']})", expanded=True):
@@ -1359,11 +1521,11 @@ def main():
                             f"{obj_name}.roll": wroll, f"{obj_name}.pitch": wpitch, f"{obj_name}.yaw": wyaw,
                             f"{obj_name}.scale_x": wsx, f"{obj_name}.scale_y": wsy, f"{obj_name}.scale_z": wsz,
                         }
-                        success = st.session_state.controller.set_workspace_marker_params(params)
+                        success, msg = st.session_state.controller.set_workspace_marker_params(params)
                         if success:
                             st.success(f"{obj_name} updated!")
                         else:
-                            st.error(f"Failed to update {obj_name}. Is the workspace_markers node running?")
+                            st.error(f"Failed to update {obj_name}: {msg}")
 
     st.markdown("---")
     
