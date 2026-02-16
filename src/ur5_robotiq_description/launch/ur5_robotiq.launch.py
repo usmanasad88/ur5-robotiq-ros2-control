@@ -78,7 +78,16 @@ def generate_launch_description():
         }.items(),
     )
     
+    # Workspace mesh markers (GLB objects in RViz)
+    workspace_markers_node = Node(
+        package='ur5_workspace_description',
+        executable='workspace_markers',
+        name='workspace_markers_publisher',
+        output='screen',
+    )
+
     return LaunchDescription(declared_arguments + [
         ur_control_launch,
         gripper_joint_publisher,
+        workspace_markers_node,
     ])

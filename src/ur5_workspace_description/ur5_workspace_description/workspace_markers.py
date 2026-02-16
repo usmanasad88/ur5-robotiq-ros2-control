@@ -2,188 +2,132 @@
 """
 Workspace Markers Publisher for UR5 Robot Environment
 
-Publishes visualization markers for RViz showing a tabletop environment
-with a table and several boxes. These are visual-only and do not affect
-collision planning.
+Publishes GLB mesh markers for RViz. Each object's pose and scale are
+exposed as ROS parameters so they can be tuned live:
+
+    ros2 param set /workspace_markers_publisher table.x  0.1
+    ros2 param set /workspace_markers_publisher table.yaw  45.0
+    ros2 param set /workspace_markers_publisher table.scale_x  1.2
 
 Usage:
     ros2 run ur5_workspace_description workspace_markers
 
 In RViz:
-    Add -> Marker -> Topic: /workspace_markers
+    Add -> MarkerArray -> Topic: /workspace_markers
 """
 
+import math
 import rclpy
 from rclpy.node import Node
+from rcl_interfaces.msg import SetParametersResult
 from visualization_msgs.msg import Marker, MarkerArray
-from geometry_msgs.msg import Point
-from std_msgs.msg import ColorRGBA
 
 
 class WorkspaceMarkersPublisher(Node):
-    """Publishes visualization markers for a tabletop workspace environment."""
-    
+    """Publishes GLB mesh markers with live-tunable ROS parameters."""
+
+    MESH_DIR = "/home/mani/Repos/ur_ws/isaac_standalone/Objects"
+
+    # Default objects — edit here to add/remove meshes.
+    # Each: (name, glb_file, x, y, z, roll, pitch, yaw, sx, sy, sz)
+    DEFAULTS = [
+        ("table",  "table.glb",      0.0, -1.0, -0.2,  90.0, 0.0, 0.0,  1.0, 1.0, 1.0),
+        ("base",   "robot_base.glb", 0.0,  0.0, -0.1,  90.0, 0.0, 0.0,  0.8, 0.8, 0.8),
+    ]
+
+    PARAM_KEYS = ("x", "y", "z", "roll", "pitch", "yaw", "scale_x", "scale_y", "scale_z")
+
     def __init__(self):
         super().__init__('workspace_markers_publisher')
-        
-        # Publisher
+
+        self.objects = []  # list of (name, glb_file)
+
+        # Declare parameters for each object
+        for name, glb, x, y, z, r, p, yw, sx, sy, sz in self.DEFAULTS:
+            self.objects.append((name, glb))
+            vals = (x, y, z, r, p, yw, sx, sy, sz)
+            for key, val in zip(self.PARAM_KEYS, vals):
+                self.declare_parameter(f"{name}.{key}", val)
+
+        # React to parameter changes immediately
+        self.add_on_set_parameters_callback(self._on_param_change)
+
         self.publisher = self.create_publisher(MarkerArray, 'workspace_markers', 10)
-        
-        # Timer - publish at 1Hz
         self.timer = self.create_timer(1.0, self.publish_markers)
-        
-        self.get_logger().info('Workspace markers publisher started')
-        self.get_logger().info('Publishing markers to /workspace_markers')
-        self.get_logger().info('In RViz: Add -> MarkerArray -> Topic: /workspace_markers')
-        
-    def create_marker(self, marker_id, marker_type, name, pose, scale, color):
-        """Helper function to create a marker."""
-        marker = Marker()
-        marker.header.frame_id = "base_link"
-        marker.header.stamp = self.get_clock().now().to_msg()
-        marker.ns = "workspace"
-        marker.id = marker_id
-        marker.type = marker_type
-        marker.action = Marker.ADD
-        
-        # Position and orientation
-        marker.pose.position.x = pose[0]
-        marker.pose.position.y = pose[1]
-        marker.pose.position.z = pose[2]
-        marker.pose.orientation.x = 0.0
-        marker.pose.orientation.y = 0.0
-        marker.pose.orientation.z = 0.0
-        marker.pose.orientation.w = 1.0
-        
-        # Scale
-        marker.scale.x = scale[0]
-        marker.scale.y = scale[1]
-        marker.scale.z = scale[2]
-        
-        # Color (RGBA)
-        marker.color.r = color[0]
-        marker.color.g = color[1]
-        marker.color.b = color[2]
-        marker.color.a = color[3]
-        
-        # Lifetime (0 = forever)
-        marker.lifetime.sec = 0
-        marker.lifetime.nanosec = 0
-        
-        # Add text label
-        marker.text = name
-        
-        return marker
-        
+
+        self.get_logger().info('Workspace markers publisher started (live-tunable)')
+        self.get_logger().info(f'Objects: {[n for n, _ in self.objects]}')
+        self.get_logger().info('Tune with: ros2 param set /workspace_markers_publisher <name>.<key> <value>')
+        self.get_logger().info(f'  keys: {", ".join(self.PARAM_KEYS)}')
+
+    def _on_param_change(self, params):
+        """Accept any parameter change — the new values are picked up on next publish."""
+        return SetParametersResult(successful=True)
+
+    @staticmethod
+    def _euler_to_quat(roll_deg, pitch_deg, yaw_deg):
+        """RPY (degrees) -> quaternion (x, y, z, w)."""
+        r, p, y = math.radians(roll_deg), math.radians(pitch_deg), math.radians(yaw_deg)
+        cx, sx = math.cos(r / 2), math.sin(r / 2)
+        cy, sy = math.cos(p / 2), math.sin(p / 2)
+        cz, sz = math.cos(y / 2), math.sin(y / 2)
+        return (
+            sx * cy * cz - cx * sy * sz,
+            cx * sy * cz + sx * cy * sz,
+            cx * cy * sz - sx * sy * cz,
+            cx * cy * cz + sx * sy * sz,
+        )
+
     def publish_markers(self):
-        """Publish all workspace markers."""
+        """Read current parameter values and publish markers."""
         marker_array = MarkerArray()
-        
-        # Table - positioned below robot base
-        table = self.create_marker(
-            marker_id=0,
-            marker_type=Marker.CUBE,
-            name="Table",
-            pose=[0.0, 0.0, -0.15],  # 15cm below base_link
-            scale=[1.2, 0.8, 0.1],   # 120cm x 80cm x 10cm
-            color=[0.6, 0.4, 0.2, 1.0]  # Brown
-        )
-        marker_array.markers.append(table)
-        
-        # Box 1 - Red box on left side of table
-        box1 = self.create_marker(
-            marker_id=1,
-            marker_type=Marker.CUBE,
-            name="Box_1",
-            pose=[0.3, 0.2, -0.05],  # On top of table
-            scale=[0.1, 0.1, 0.1],   # 10cm cube
-            color=[0.8, 0.1, 0.1, 1.0]  # Red
-        )
-        marker_array.markers.append(box1)
-        
-        # Box 2 - Green box in center
-        box2 = self.create_marker(
-            marker_id=2,
-            marker_type=Marker.CUBE,
-            name="Box_2",
-            pose=[0.35, -0.1, -0.05],
-            scale=[0.12, 0.08, 0.15],  # Rectangular box
-            color=[0.1, 0.8, 0.1, 1.0]  # Green
-        )
-        marker_array.markers.append(box2)
-        
-        # Box 3 - Blue box on right side
-        box3 = self.create_marker(
-            marker_id=3,
-            marker_type=Marker.CUBE,
-            name="Box_3",
-            pose=[0.25, -0.25, -0.05],
-            scale=[0.08, 0.08, 0.2],  # Tall thin box
-            color=[0.1, 0.1, 0.8, 1.0]  # Blue
-        )
-        marker_array.markers.append(box3)
-        
-        # Box 4 - Yellow box near robot
-        box4 = self.create_marker(
-            marker_id=4,
-            marker_type=Marker.CUBE,
-            name="Box_4",
-            pose=[0.15, 0.0, -0.05],
-            scale=[0.15, 0.15, 0.1],  # Wide flat box
-            color=[0.9, 0.9, 0.1, 1.0]  # Yellow
-        )
-        marker_array.markers.append(box4)
-        
-        # Cylinder obstacle - Orange cylinder
-        cylinder = self.create_marker(
-            marker_id=5,
-            marker_type=Marker.CYLINDER,
-            name="Cylinder",
-            pose=[0.4, 0.3, 0.0],
-            scale=[0.08, 0.08, 0.2],  # Diameter 8cm, height 20cm
-            color=[1.0, 0.5, 0.0, 1.0]  # Orange
-        )
-        marker_array.markers.append(cylinder)
-        
-        # Add text labels above each object
-        label_height = 0.15
-        labels = [
-            (0, "TABLE", [0.0, 0.0, -0.05], [1.0, 1.0, 1.0, 1.0]),
-            (10, "Red Box", [0.3, 0.2, label_height], [1.0, 1.0, 1.0, 0.8]),
-            (11, "Green Box", [0.35, -0.1, label_height], [1.0, 1.0, 1.0, 0.8]),
-            (12, "Blue Box", [0.25, -0.25, label_height], [1.0, 1.0, 1.0, 0.8]),
-            (13, "Yellow Box", [0.15, 0.0, label_height], [1.0, 1.0, 1.0, 0.8]),
-            (14, "Cylinder", [0.4, 0.3, label_height], [1.0, 1.0, 1.0, 0.8]),
-        ]
-        
-        for label_id, text, pos, color in labels:
-            label = Marker()
-            label.header.frame_id = "base_link"
-            label.header.stamp = self.get_clock().now().to_msg()
-            label.ns = "labels"
-            label.id = label_id
-            label.type = Marker.TEXT_VIEW_FACING
-            label.action = Marker.ADD
-            label.pose.position.x = pos[0]
-            label.pose.position.y = pos[1]
-            label.pose.position.z = pos[2]
-            label.pose.orientation.w = 1.0
-            label.scale.z = 0.03  # Text height
-            label.color.r = color[0]
-            label.color.g = color[1]
-            label.color.b = color[2]
-            label.color.a = color[3]
-            label.text = text
-            marker_array.markers.append(label)
-        
-        # Publish marker array
+
+        for obj_id, (name, glb_file) in enumerate(self.objects):
+            x  = self.get_parameter(f"{name}.x").value
+            y  = self.get_parameter(f"{name}.y").value
+            z  = self.get_parameter(f"{name}.z").value
+            ro = self.get_parameter(f"{name}.roll").value
+            pi = self.get_parameter(f"{name}.pitch").value
+            ya = self.get_parameter(f"{name}.yaw").value
+            sx = self.get_parameter(f"{name}.scale_x").value
+            sy = self.get_parameter(f"{name}.scale_y").value
+            sz = self.get_parameter(f"{name}.scale_z").value
+
+            m = Marker()
+            m.header.frame_id = "base_link"
+            m.header.stamp = self.get_clock().now().to_msg()
+            m.ns = "workspace_meshes"
+            m.id = obj_id
+            m.type = Marker.MESH_RESOURCE
+            m.action = Marker.ADD
+            m.mesh_resource = f"file://{self.MESH_DIR}/{glb_file}"
+            m.mesh_use_embedded_materials = True
+
+            m.pose.position.x = float(x)
+            m.pose.position.y = float(y)
+            m.pose.position.z = float(z)
+            qx, qy, qz, qw = self._euler_to_quat(ro, pi, ya)
+            m.pose.orientation.x = qx
+            m.pose.orientation.y = qy
+            m.pose.orientation.z = qz
+            m.pose.orientation.w = qw
+
+            m.scale.x = float(sx)
+            m.scale.y = float(sy)
+            m.scale.z = float(sz)
+
+            # alpha=0 lets RViz use the GLB's embedded materials/textures
+            m.color.a = 0.0
+
+            marker_array.markers.append(m)
+
         self.publisher.publish(marker_array)
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = WorkspaceMarkersPublisher()
-    
+
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -143,6 +143,10 @@ class ROSProgramController:
             SetParameters, '/ur5_program_executor/set_parameters')
         self.move_to_pose_client = self.node.create_client(
             Trigger, '/ur5_program_executor/move_to_pose')
+
+        # Workspace markers parameter client (for live object placement)
+        self.ws_set_params_client = self.node.create_client(
+            SetParameters, '/workspace_markers_publisher/set_parameters')
         
         # Publishers for direct commands
         self.gripper_pub = self.node.create_publisher(
@@ -408,6 +412,33 @@ class ROSProgramController:
         except Exception as e:
             return False, f"Failed to send gripper command: {e}"
     
+    def set_workspace_marker_params(self, params: dict) -> bool:
+        """Set parameters on the workspace_markers_publisher node.
+
+        Args:
+            params: dict of {param_name: float_value}
+                    e.g. {"table.x": 0.1, "table.yaw": 45.0}
+        """
+        if not ROS_AVAILABLE:
+            return False
+
+        request = SetParameters.Request()
+        for name, value in params.items():
+            param = Parameter()
+            param.name = name
+            param.value = ParameterValue(
+                type=ParameterType.PARAMETER_DOUBLE,
+                double_value=float(value),
+            )
+            request.parameters.append(param)
+
+        future = self.ws_set_params_client.call_async(request)
+        if not self._spin_for_future(future, timeout_sec=2.0):
+            return False
+        if future.result() is not None:
+            return all(r.successful for r in future.result().results)
+        return False
+
     def move_to_joint_positions(self, joint_positions: list, duration: float = 3.0) -> tuple[bool, str]:
         """Move robot to specified joint positions."""
         if not ROS_AVAILABLE:
@@ -1130,7 +1161,7 @@ def main():
     st.subheader("🎯 Direct Commands")
     
     # Create tabs for different command types
-    cmd_tab1, cmd_tab2, cmd_tab3 = st.tabs(["🤏 Gripper", "📍 Named Positions", "🔧 Manual Input"])
+    cmd_tab1, cmd_tab2, cmd_tab3, cmd_tab4 = st.tabs(["🤏 Gripper", "📍 Named Positions", "🔧 Manual Input", "🏗️ Workspace Objects"])
     
     with cmd_tab1:
         st.markdown("#### Gripper Control")
@@ -1289,7 +1320,51 @@ def main():
                         # Convert from radians to degrees for display
                         pos_deg = pos * 180.0 / 3.14159265359
                         st.metric(f"J{i+1}", f"{pos_deg:.1f}°")
-    
+
+    with cmd_tab4:
+        st.markdown("#### Workspace Object Placement")
+        st.caption("Adjust GLB mesh positions in RViz — changes apply live on the next 1 Hz publish cycle")
+
+        # Object defaults (must match workspace_markers.py DEFAULTS)
+        WS_OBJECTS = {
+            "table": {"file": "table.glb",      "x": 0.0, "y": -1.0, "z": -0.2, "roll": 90.0, "pitch": 0.0, "yaw": 0.0, "scale_x": 1.0, "scale_y": 1.0, "scale_z": 1.0},
+            "base":  {"file": "robot_base.glb",  "x": 0.0, "y":  0.0, "z": -0.1, "roll": 90.0, "pitch": 0.0, "yaw": 0.0, "scale_x": 0.8, "scale_y": 0.8, "scale_z": 0.8},
+        }
+
+        for obj_name, defaults in WS_OBJECTS.items():
+            with st.expander(f"{obj_name}  ({defaults['file']})", expanded=True):
+                st.markdown("**Position (m)**")
+                pc = st.columns(3)
+                wx = pc[0].number_input("X", value=defaults["x"], step=0.01, format="%.3f", key=f"ws_{obj_name}_x")
+                wy = pc[1].number_input("Y", value=defaults["y"], step=0.01, format="%.3f", key=f"ws_{obj_name}_y")
+                wz = pc[2].number_input("Z", value=defaults["z"], step=0.01, format="%.3f", key=f"ws_{obj_name}_z")
+
+                st.markdown("**Rotation (deg)**")
+                rc = st.columns(3)
+                wroll  = rc[0].number_input("Roll",  value=defaults["roll"],  step=1.0, format="%.1f", key=f"ws_{obj_name}_roll")
+                wpitch = rc[1].number_input("Pitch", value=defaults["pitch"], step=1.0, format="%.1f", key=f"ws_{obj_name}_pitch")
+                wyaw   = rc[2].number_input("Yaw",   value=defaults["yaw"],   step=1.0, format="%.1f", key=f"ws_{obj_name}_yaw")
+
+                st.markdown("**Scale**")
+                sc = st.columns(3)
+                wsx = sc[0].number_input("Scale X", value=defaults["scale_x"], step=0.01, min_value=0.01, format="%.3f", key=f"ws_{obj_name}_sx")
+                wsy = sc[1].number_input("Scale Y", value=defaults["scale_y"], step=0.01, min_value=0.01, format="%.3f", key=f"ws_{obj_name}_sy")
+                wsz = sc[2].number_input("Scale Z", value=defaults["scale_z"], step=0.01, min_value=0.01, format="%.3f", key=f"ws_{obj_name}_sz")
+
+                if st.button(f"Apply {obj_name}", key=f"ws_apply_{obj_name}", type="primary",
+                             use_container_width=True, disabled=not ROS_AVAILABLE):
+                    if st.session_state.controller:
+                        params = {
+                            f"{obj_name}.x": wx, f"{obj_name}.y": wy, f"{obj_name}.z": wz,
+                            f"{obj_name}.roll": wroll, f"{obj_name}.pitch": wpitch, f"{obj_name}.yaw": wyaw,
+                            f"{obj_name}.scale_x": wsx, f"{obj_name}.scale_y": wsy, f"{obj_name}.scale_z": wsz,
+                        }
+                        success = st.session_state.controller.set_workspace_marker_params(params)
+                        if success:
+                            st.success(f"{obj_name} updated!")
+                        else:
+                            st.error(f"Failed to update {obj_name}. Is the workspace_markers node running?")
+
     st.markdown("---")
     
     # ========================================
