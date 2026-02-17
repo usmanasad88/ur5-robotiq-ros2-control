@@ -20,11 +20,13 @@ from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from std_msgs.msg import Bool, String, Float64
 from std_srvs.srv import Trigger, SetBool
+from ur5_teleop_msgs.msg import PoseDelta
 from rcl_interfaces.msg import ParameterDescriptor
 
 import torch
 import numpy as np
 import time
+from scipy.spatial.transform import Rotation
 import os
 import sys
 import threading
@@ -68,6 +70,7 @@ class ExecutorState(Enum):
     EXECUTING = auto()
     PAUSED = auto()
     ERROR = auto()
+    TELEOP = auto()
 
 
 class UR5ProgramExecutorNode(Node):
@@ -202,7 +205,15 @@ class UR5ProgramExecutorNode(Node):
         # Sub-program recursion guard (max depth)
         self.max_sub_program_depth = 10
         self.current_sub_program_depth = 0
-        
+
+        # Teleop state (SpaceMouse / keyboard / VR delta control)
+        self._teleop_target_pos: Optional[list] = None   # [x, y, z] meters
+        self._teleop_target_quat: Optional[list] = None  # [w, x, y, z]
+        self._teleop_replan_timer = None
+        self._teleop_sub = None
+        self._teleop_lock = threading.Lock()
+        self._teleop_dirty = False  # True when new deltas have arrived since last replan
+
         # ROS Interfaces
         self._setup_subscribers()
         self._setup_publishers()
@@ -701,6 +712,14 @@ class UR5ProgramExecutorNode(Node):
             self.move_relative_callback,
             callback_group=self.callback_group
         )
+
+        # Service to enable/disable teleop mode (spacemouse / keyboard / VR delta control)
+        self.set_teleop_mode_srv = self.create_service(
+            SetBool,
+            '~/set_teleop_mode',
+            self.set_teleop_mode_callback,
+            callback_group=self.callback_group
+        )
     
     def joint_state_callback(self, msg: JointState):
         """Handle incoming joint states."""
@@ -1082,7 +1101,218 @@ class UR5ProgramExecutorNode(Node):
             self.get_logger().error(f"Error in move_relative: {e}")
         
         return response
-    
+
+    # ------------------------------------------------------------------
+    # Teleop mode (SpaceMouse / keyboard / VR delta control)
+    # ------------------------------------------------------------------
+
+    def set_teleop_mode_callback(self, request, response):
+        """Service callback: enable (True) or disable (False) teleop mode."""
+        if request.data:
+            # Cannot enter teleop while a program is executing
+            if self.state == ExecutorState.EXECUTING:
+                response.success = False
+                response.message = "Cannot enable teleop while a program is executing. Stop first."
+                return response
+
+            if self.state == ExecutorState.TELEOP:
+                response.success = True
+                response.message = "Teleop mode already active"
+                return response
+
+            # Initialise target pose from current FK
+            if self.current_joint_state is None:
+                response.success = False
+                response.message = "No joint state available — cannot initialise teleop target"
+                return response
+
+            try:
+                kin_state = self.motion_gen.kinematics.get_state(
+                    self.current_joint_state.view(1, -1)
+                )
+                ee_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
+                ee_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
+            except Exception as e:
+                response.success = False
+                response.message = f"FK failed: {e}"
+                return response
+
+            with self._teleop_lock:
+                self._teleop_target_pos = ee_pos
+                self._teleop_target_quat = ee_quat
+                self._teleop_dirty = False
+
+            # Subscribe to teleop deltas and start replan timer
+            if self._teleop_sub is None:
+                self._teleop_sub = self.create_subscription(
+                    PoseDelta,
+                    '/ur5/teleop_delta',
+                    self._teleop_delta_callback,
+                    10,
+                    callback_group=self.callback_group
+                )
+            if self._teleop_replan_timer is None:
+                self._teleop_replan_timer = self.create_timer(
+                    0.1,  # 10 Hz
+                    self._teleop_replan_callback,
+                    callback_group=self.callback_group
+                )
+
+            self.state = ExecutorState.TELEOP
+            self.get_logger().info(
+                f"Teleop mode enabled. Target: pos={[f'{v:.4f}' for v in ee_pos]}"
+            )
+            response.success = True
+            response.message = "Teleop mode enabled"
+        else:
+            # Disable teleop
+            if self.state != ExecutorState.TELEOP:
+                response.success = True
+                response.message = "Teleop mode was not active"
+                return response
+
+            self._teleop_cleanup()
+            self.state = ExecutorState.IDLE
+            self.get_logger().info("Teleop mode disabled")
+            response.success = True
+            response.message = "Teleop mode disabled"
+
+        return response
+
+    def _teleop_cleanup(self):
+        """Tear down teleop subscriber and timer."""
+        if self._teleop_replan_timer is not None:
+            self._teleop_replan_timer.cancel()
+            self._teleop_replan_timer = None
+        if self._teleop_sub is not None:
+            self.destroy_subscription(self._teleop_sub)
+            self._teleop_sub = None
+        with self._teleop_lock:
+            self._teleop_target_pos = None
+            self._teleop_target_quat = None
+            self._teleop_dirty = False
+
+    def _teleop_delta_callback(self, msg: PoseDelta):
+        """Accumulate incoming PoseDelta into the teleop target pose."""
+        if self.state != ExecutorState.TELEOP:
+            return
+
+        with self._teleop_lock:
+            if self._teleop_target_pos is None or self._teleop_target_quat is None:
+                return
+
+            has_translation = (msg.dx != 0.0 or msg.dy != 0.0 or msg.dz != 0.0)
+            has_rotation = (msg.droll != 0.0 or msg.dpitch != 0.0 or msg.dyaw != 0.0)
+
+            if not has_translation and not has_rotation:
+                # Zero delta — spacemouse is at rest; no replan needed
+                return
+
+            # Accumulate translation
+            self._teleop_target_pos[0] += msg.dx
+            self._teleop_target_pos[1] += msg.dy
+            self._teleop_target_pos[2] += msg.dz
+
+            # Accumulate rotation via quaternion composition: q_new = delta_q * q_current
+            # msg: droll=Rx, dpitch=Ry, dyaw=Rz (intrinsic XYZ, small angles from spacemouse)
+            if has_rotation:
+                delta_rot = Rotation.from_euler('xyz', [msg.droll, msg.dpitch, msg.dyaw])
+                # Current quat is [w, x, y, z] (cuRobo convention)
+                qw, qx, qy, qz = self._teleop_target_quat
+                current_rot = Rotation.from_quat([qx, qy, qz, qw])  # scipy: [x,y,z,w]
+                new_rot = delta_rot * current_rot
+                qx, qy, qz, qw = new_rot.as_quat()  # scipy returns [x,y,z,w]
+                self._teleop_target_quat = [qw, qx, qy, qz]
+
+            # Signal that there is a new target to plan towards
+            self._teleop_dirty = True
+
+            self.get_logger().info(
+                f"Teleop delta received: dx={msg.dx:.6f} dy={msg.dy:.6f} dz={msg.dz:.6f} "
+                f"→ target=[{self._teleop_target_pos[0]:.4f}, {self._teleop_target_pos[1]:.4f}, {self._teleop_target_pos[2]:.4f}]"
+            )
+
+    def _teleop_replan_callback(self):
+        """Plan a motion to the accumulated teleop target pose, only when new deltas arrived."""
+        if self.state != ExecutorState.TELEOP:
+            return
+
+        if self.current_joint_state is None:
+            return
+
+        with self._teleop_lock:
+            if not self._teleop_dirty:
+                # No new input since last replan — leave in-flight trajectory alone
+                return
+            if self._teleop_target_pos is None or self._teleop_target_quat is None:
+                return
+            target_pos = list(self._teleop_target_pos)
+            target_quat = list(self._teleop_target_quat)
+            self._teleop_dirty = False  # Clear before releasing lock
+
+        self.get_logger().info(
+            f"Teleop replanning → target pos=[{target_pos[0]:.4f},{target_pos[1]:.4f},{target_pos[2]:.4f}]"
+        )
+
+        try:
+            target_pose = CuroboPose(
+                position=torch.tensor(target_pos, device=self.tensor_args.device,
+                                      dtype=self.tensor_args.dtype),
+                quaternion=torch.tensor(target_quat, device=self.tensor_args.device,
+                                        dtype=self.tensor_args.dtype)
+            )
+            start_state = CuroboJointState.from_position(
+                self.current_joint_state.view(1, -1)
+            )
+            result = self.motion_gen.plan_single(
+                start_state, target_pose,
+                MotionGenPlanConfig(enable_graph=False, timeout=2.0)
+            )
+            if result.success.item():
+                traj = result.get_interpolated_plan()
+                steps = traj.position.shape[1] if len(traj.position.shape) > 2 else traj.position.shape[0]
+                self._publish_teleop_trajectory(traj)
+                self.get_logger().info(
+                    f"Teleop replan OK ({steps} steps) → "
+                    f"pos=[{target_pos[0]:.4f},{target_pos[1]:.4f},{target_pos[2]:.4f}]"
+                )
+            else:
+                self.get_logger().warn(f"Teleop replan FAILED: {result.status}")
+        except Exception as e:
+            self.get_logger().error(f"Teleop replan error: {e}")
+
+    def _publish_teleop_trajectory(self, traj):
+        """Publish a trajectory with positions AND velocities for teleop.
+
+        Including velocities and a header stamp, and starting waypoints at t=dt
+        (not t=0) prevents the joint_trajectory_controller from triggering
+        state-tolerance violations when a new trajectory replaces an in-flight one.
+        """
+        traj_msg = JointTrajectory()
+        traj_msg.joint_names = self.joint_names
+        traj_msg.header.stamp = self.get_clock().now().to_msg()
+
+        pos_np = traj.position.squeeze(0).cpu().numpy()   # (steps, 6)
+        vel_np = traj.velocity.squeeze(0).cpu().numpy() if hasattr(traj, 'velocity') and traj.velocity is not None else None
+        steps = pos_np.shape[0]
+
+        effective_dt = self.dt / self.speed_factor
+
+        for i in range(steps):
+            point = JointTrajectoryPoint()
+            point.positions = pos_np[i].tolist()
+            if vel_np is not None:
+                point.velocities = vel_np[i].tolist()
+            else:
+                point.velocities = [0.0] * len(self.joint_names)
+            # Start at (i+1)*dt — never send a waypoint at t=0
+            time_sec = (i + 1) * effective_dt
+            point.time_from_start.sec = int(time_sec)
+            point.time_from_start.nanosec = int((time_sec - int(time_sec)) * 1e9)
+            traj_msg.points.append(point)
+
+        self.traj_pub.publish(traj_msg)
+
     def execution_step(self):
         """Execute the next instruction in the program.
         
@@ -1671,27 +1901,36 @@ class UR5ProgramExecutorNode(Node):
         """Publish trajectory to robot controller."""
         traj_msg = JointTrajectory()
         traj_msg.joint_names = self.joint_names
-        
-        # Handle JointState object or tensor
+        traj_msg.header.stamp = self.get_clock().now().to_msg()
+
+        # Handle JointState object or tensor; extract velocities if available
         if hasattr(traj_input, 'position'):
             traj_tensor = traj_input.position
+            vel_tensor = traj_input.velocity if hasattr(traj_input, 'velocity') and traj_input.velocity is not None else None
         else:
             traj_tensor = traj_input
-        
+            vel_tensor = None
+
         traj_np = traj_tensor.squeeze(0).cpu().numpy()
+        vel_np = vel_tensor.squeeze(0).cpu().numpy() if vel_tensor is not None else None
         steps = traj_np.shape[0]
-        
-        # Apply speed factor to trajectory timing
+
+        # Apply speed factor to trajectory timing.
+        # Start at (i+1)*dt so the first waypoint is in the future, not at t=0.
+        # A waypoint at t=0 tells the controller "you must already be here",
+        # which causes immediate state-tolerance violations.
         effective_dt = self.dt / self.speed_factor
-        
+
         for i in range(steps):
             point = JointTrajectoryPoint()
             point.positions = traj_np[i].tolist()
-            time_sec = i * effective_dt
+            if vel_np is not None:
+                point.velocities = vel_np[i].tolist()
+            time_sec = (i + 1) * effective_dt
             point.time_from_start.sec = int(time_sec)
             point.time_from_start.nanosec = int((time_sec - int(time_sec)) * 1e9)
             traj_msg.points.append(point)
-        
+
         self.traj_pub.publish(traj_msg)
     
     def estimate_trajectory_duration(self, traj_input) -> float:
@@ -1709,17 +1948,18 @@ class UR5ProgramExecutorNode(Node):
         """Stop robot by sending current position as target with safe deceleration."""
         if self.current_joint_state is None:
             return
-        
+
         traj_msg = JointTrajectory()
         traj_msg.joint_names = self.joint_names
-        
+        traj_msg.header.stamp = self.get_clock().now().to_msg()
+
         point = JointTrajectoryPoint()
         point.positions = self.current_joint_state.cpu().numpy().tolist()
         point.velocities = [0.0] * 6
-        # Use 2 seconds for safe stop motion (was 0.5 seconds which is dangerously fast)
+        # Use 2 seconds for safe stop motion
         point.time_from_start.sec = 2
         point.time_from_start.nanosec = 0
-        
+
         traj_msg.points.append(point)
         self.traj_pub.publish(traj_msg)
     
@@ -1743,11 +1983,15 @@ class UR5ProgramExecutorNode(Node):
         Next) resumes from wherever the program left off.
         """
         self._stop_event.set()  # Interrupt any ongoing sleep/wait
-        
+
+        # Clean up teleop resources if in teleop mode
+        if self.state == ExecutorState.TELEOP:
+            self._teleop_cleanup()
+
         if self.execution_timer:
             self.execution_timer.cancel()
             self.execution_timer = None
-        
+
         self.state = ExecutorState.IDLE
         # Deliberately NOT resetting current_instruction_idx —
         # this preserves the program position so the user can resume.

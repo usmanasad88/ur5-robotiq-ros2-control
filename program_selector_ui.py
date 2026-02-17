@@ -144,6 +144,8 @@ class ROSProgramController:
             SetParameters, '/ur5_program_executor/set_parameters')
         self.move_to_pose_client = self.node.create_client(
             Trigger, '/ur5_program_executor/move_to_pose')
+        self.set_teleop_mode_client = self.node.create_client(
+            SetBool, '/ur5_program_executor/set_teleop_mode')
 
         # Workspace markers parameter clients (for live object placement)
         self.ws_set_params_client = self.node.create_client(
@@ -289,6 +291,21 @@ class ROSProgramController:
             return future.result().success, future.result().message
         return False, "Service call timeout"
     
+    def set_teleop_mode(self, enable: bool) -> tuple[bool, str]:
+        """Enable or disable teleop mode on the program executor."""
+        if not ROS_AVAILABLE:
+            return False, "ROS not available"
+
+        request = SetBool.Request()
+        request.data = enable
+        future = self.set_teleop_mode_client.call_async(request)
+        if not self._spin_for_future(future, timeout_sec=3.0):
+            return False, "Service call busy or timed out"
+
+        if future.result() is not None:
+            return future.result().success, future.result().message
+        return False, "Service call timeout"
+
     def open_gripper(self) -> tuple[bool, str]:
         """Send open gripper command via ROS 2 action."""
         if not ROS_AVAILABLE:
@@ -1070,9 +1087,12 @@ def main():
     
     if 'is_recording' not in st.session_state:
         st.session_state.is_recording = False
-    
+
     if 'recorder' not in st.session_state:
         st.session_state.recorder = None
+
+    if 'teleop_active' not in st.session_state:
+        st.session_state.teleop_active = False
     
     # Sidebar - Status and Controls
     with st.sidebar:
@@ -1234,13 +1254,62 @@ def main():
                 if success:
                     st.session_state.status_message = '<p class="status-error">🛑 Stopped</p>'
                     st.session_state.is_executing = False
+                    st.session_state.teleop_active = False  # Stop also disables teleop
                     # Log stop event if recording
                     if st.session_state.is_recording and st.session_state.recorder:
                         st.session_state.recorder.log_program_event('stop', st.session_state.current_program)
                     st.rerun()
         
         st.markdown("---")
-        
+
+        # SpaceMouse / Teleop Control
+        st.subheader("🕹️ Teleop Control")
+
+        if st.session_state.teleop_active:
+            st.success("🟢 Teleop: Active")
+            st.caption("SpaceMouse (or keyboard/VR) deltas are being tracked.")
+        else:
+            st.info("⚫ Teleop: Inactive")
+
+        tcol1, tcol2 = st.columns(2)
+        with tcol1:
+            if st.button(
+                "Enable",
+                key="teleop_enable",
+                disabled=st.session_state.teleop_active or not executor_running or not ROS_AVAILABLE,
+                use_container_width=True,
+                type="primary"
+            ):
+                if st.session_state.controller:
+                    success, msg = st.session_state.controller.set_teleop_mode(True)
+                    if success:
+                        st.session_state.teleop_active = True
+                        st.session_state.status_message = '<p class="status-success">🕹️ Teleop enabled</p>'
+                    else:
+                        st.session_state.status_message = f'<p class="status-error">❌ {msg}</p>'
+                    st.rerun()
+
+        with tcol2:
+            if st.button(
+                "Disable",
+                key="teleop_disable",
+                disabled=not st.session_state.teleop_active or not executor_running or not ROS_AVAILABLE,
+                use_container_width=True,
+                type="secondary"
+            ):
+                if st.session_state.controller:
+                    success, msg = st.session_state.controller.set_teleop_mode(False)
+                    if success:
+                        st.session_state.teleop_active = False
+                        st.session_state.status_message = '<p class="status-error">🕹️ Teleop disabled</p>'
+                    else:
+                        st.session_state.status_message = f'<p class="status-error">❌ {msg}</p>'
+                    st.rerun()
+
+        st.caption("Requires spacemouse_teleop node running: `./run_spacemouse_teleop.sh`")
+
+        st.markdown("---")
+
         # Refresh button
         if st.button("🔄 Refresh Programs", use_container_width=True):
             st.rerun()

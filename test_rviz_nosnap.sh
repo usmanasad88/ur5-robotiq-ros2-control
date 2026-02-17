@@ -25,8 +25,9 @@ export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu"
 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/ros/humble/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib"
 
 # Then workspace
-cd /home/mani/Repos/ur_ws
-source install/setup.bash 2>/dev/null
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source /opt/ros/humble/setup.bash 2>/dev/null
+source "$SCRIPT_DIR/install/setup.bash" 2>/dev/null
 
 echo "Library path (first 10):"
 echo "$LD_LIBRARY_PATH" | tr ':' '\n' | head -10

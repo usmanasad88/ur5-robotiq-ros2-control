@@ -30,20 +30,21 @@ unset LD_LIBRARY_PATH
 export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/opt/ros/humble/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib"
 
 # Now source ROS2 (this will append workspace paths)
-cd /home/mani/Repos/ur_ws
-source install/setup.bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source /opt/ros/humble/setup.bash
+source "$SCRIPT_DIR/install/setup.bash"
 
 echo "Running UR5 SpaceMouse Teleop..."
 
 # Default arguments if none provided
 if [ $# -eq 0 ]; then
     echo "No arguments provided. Using defaults:"
-    echo "  -p scale_translation:=0.001"
-    echo "  -p scale_rotation:=0.005"
+    echo "  -p scale_translation:=0.002"
+    echo "  -p scale_rotation:=0.01"
     echo "  -p publish_rate:=10.0"
     exec ros2 run ur5_spacemouse_teleop spacemouse_teleop_node --ros-args \
-        -p scale_translation:=0.01 \
-        -p scale_rotation:=0.05 \
+        -p scale_translation:=0.002 \
+        -p scale_rotation:=0.01 \
         -p publish_rate:=10.0
 else
     echo "Arguments: $@"

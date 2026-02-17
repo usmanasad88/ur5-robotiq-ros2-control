@@ -30,8 +30,9 @@ unset LD_LIBRARY_PATH
 export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/opt/ros/humble/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib"
 
 # Now source ROS2 (this will append workspace paths)
-cd /home/mani/Repos/ur_ws
-source install/setup.bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source /opt/ros/humble/setup.bash
+source "$SCRIPT_DIR/install/setup.bash"
 
 echo "Running UR5 VR Teleop..."
 

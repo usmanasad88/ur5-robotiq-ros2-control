@@ -41,19 +41,20 @@ class SpaceMouseTeleopNode(Node):
         publish_rate = self.get_parameter('publish_rate').value
         
         # Open SpaceMouse device
-        success = pyspacemouse.open(
-            set_nonblocking_loop=False,
-            DeviceNumber=self.device_number
-        )
-        
-        if not success:
-            self.get_logger().error('Could not open SpaceMouse device!')
+        try:
+            self.device = pyspacemouse.open(
+                nonblocking=False,
+                device_index=self.device_number
+            )
+        except RuntimeError as e:
+            self.get_logger().error(f'Could not open SpaceMouse device: {e}')
             self.get_logger().error('Troubleshooting:')
             self.get_logger().error('1. Make sure the SpaceMouse is connected via USB')
             self.get_logger().error('2. Check if detected: lsusb | grep 3Dconnexion')
             self.get_logger().error('3. You might need udev rules for non-root access')
             self.get_logger().error('   Create /etc/udev/rules.d/90-spacemouse.rules with:')
             self.get_logger().error('   SUBSYSTEM=="usb", ATTRS{idVendor}=="256f", MODE="0666"')
+            self.get_logger().error('   SUBSYSTEM=="hidraw", ATTRS{idVendor}=="256f", MODE="0666"')
             self.get_logger().error('4. Reload udev: sudo udevadm control --reload-rules')
             sys.exit(1)
         
@@ -78,7 +79,7 @@ class SpaceMouseTeleopNode(Node):
 
     def timer_callback(self):
         """Read SpaceMouse and publish PoseDelta message."""
-        state = pyspacemouse.read()
+        state = self.device.read()
         
         if state is None:
             return
@@ -108,9 +109,9 @@ class SpaceMouseTeleopNode(Node):
             self.publisher_.publish(msg)
             
             if not is_zero:
-                self.get_logger().debug(
-                    f'Published: dx={dx:.4f}, dy={dy:.4f}, dz={dz:.4f}, '
-                    f'dr={droll:.4f}, dp={dpitch:.4f}, dyw={dyaw:.4f}'
+                self.get_logger().info(
+                    f'Published: dx={dx:.6f}, dy={dy:.6f}, dz={dz:.6f}, '
+                    f'dr={droll:.6f}, dp={dpitch:.6f}, dyw={dyaw:.6f}'
                 )
         
         self.last_was_zero = is_zero
@@ -118,22 +119,23 @@ class SpaceMouseTeleopNode(Node):
     def destroy_node(self):
         """Clean up SpaceMouse device on shutdown."""
         self.get_logger().info('Closing SpaceMouse device...')
-        pyspacemouse.close()
+        self.device.close()
         super().destroy_node()
 
 
 def main(args=None):
     """Main entry point."""
     rclpy.init(args=args)
-    
+    node = None
     try:
         node = SpaceMouseTeleopNode()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        if rclpy.ok():
+        if node is not None:
             node.destroy_node()
+        if rclpy.ok():
             rclpy.shutdown()
 
 

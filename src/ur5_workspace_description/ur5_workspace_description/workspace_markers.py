@@ -21,12 +21,13 @@ import rclpy
 from rclpy.node import Node
 from rcl_interfaces.msg import SetParametersResult
 from visualization_msgs.msg import Marker, MarkerArray
+import os
 
 
 class WorkspaceMarkersPublisher(Node):
     """Publishes GLB mesh markers with live-tunable ROS parameters."""
 
-    MESH_DIR = "/home/mani/Repos/ur_ws/isaac_standalone/Objects"
+    MESH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../isaac_standalone/Objects")
 
     # Default objects — edit here to add/remove meshes.
     # Each: (name, glb_file, x, y, z, roll, pitch, yaw, sx, sy, sz)
