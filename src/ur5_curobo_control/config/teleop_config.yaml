@@ -1,0 +1,14 @@
+# SpaceMouse jog configuration
+# Edit this file and it will be reloaded automatically (no restart needed).
+
+# Linear jog speed in m/s — how fast the EE translates per second of input
+teleop_jog_linear: 0.05
+
+# Angular jog speed in rad/s — how fast the EE rotates per second of input
+teleop_jog_angular: 0.3
+
+# Jog replan period in seconds — how often a new jog step is sent to the robot (1 / Hz)
+teleop_replan_period: 0.1
+
+# Axis threshold — spacemouse axis value (0-1) that must be exceeded to trigger jog
+teleop_axis_threshold: 0.05

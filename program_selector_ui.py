@@ -144,6 +144,8 @@ class ROSProgramController:
             SetParameters, '/ur5_program_executor/set_parameters')
         self.move_to_pose_client = self.node.create_client(
             Trigger, '/ur5_program_executor/move_to_pose')
+        self.move_relative_client = self.node.create_client(
+            Trigger, '/ur5_program_executor/move_relative')
         self.set_teleop_mode_client = self.node.create_client(
             SetBool, '/ur5_program_executor/set_teleop_mode')
 
@@ -626,6 +628,47 @@ class ROSProgramController:
             
         except Exception as e:
             return False, f"Failed to move to pose: {e}"
+
+
+    def move_relative(self, direction: str, distance: float = 0.05) -> tuple[bool, str]:
+        """Move end-effector by a Cartesian offset in the given direction.
+
+        Args:
+            direction: one of 'left', 'right', 'forward', 'back', 'up', 'down'
+            distance: step size in metres
+        """
+        if not ROS_AVAILABLE:
+            return False, "ROS not available"
+
+        try:
+            # Set direction and distance parameters
+            request = SetParameters.Request()
+            dir_param = Parameter()
+            dir_param.name = 'relative_move_direction'
+            dir_param.value = ParameterValue(
+                type=ParameterType.PARAMETER_STRING, string_value=direction)
+            dist_param = Parameter()
+            dist_param.name = 'relative_move_distance'
+            dist_param.value = ParameterValue(
+                type=ParameterType.PARAMETER_DOUBLE, double_value=float(distance))
+            request.parameters = [dir_param, dist_param]
+
+            future = self.set_parameters_client.call_async(request)
+            if not self._spin_for_future(future, timeout_sec=2.0):
+                return False, "Failed to set relative move parameters (busy)"
+            if future.result() is None:
+                return False, "Failed to set relative move parameters (timeout)"
+
+            # Call the move_relative service
+            move_req = Trigger.Request()
+            future = self.move_relative_client.call_async(move_req)
+            if not self._spin_for_future(future, timeout_sec=10.0):
+                return False, "Move relative service call busy"
+            if future.result() is not None:
+                return future.result().success, future.result().message
+            return False, "Move relative service call timeout"
+        except Exception as e:
+            return False, f"Failed to move relative: {e}"
 
 
 def get_programs_directory():
@@ -1320,7 +1363,7 @@ def main():
     st.subheader("🎯 Direct Commands")
     
     # Create tabs for different command types
-    cmd_tab1, cmd_tab2, cmd_tab3, cmd_tab4 = st.tabs(["🤏 Gripper", "📍 Named Positions", "🔧 Manual Input", "🏗️ Workspace Objects"])
+    cmd_tab1, cmd_tab2, cmd_tab3, cmd_tab4, cmd_tab5 = st.tabs(["🤏 Gripper", "📍 Named Positions", "🔧 Manual Input", "🏗️ Workspace Objects", "🎛️ Teach Pendant"])
     
     with cmd_tab1:
         st.markdown("#### Gripper Control")
@@ -1595,6 +1638,245 @@ def main():
                             st.success(f"{obj_name} updated!")
                         else:
                             st.error(f"Failed to update {obj_name}: {msg}")
+
+    # ========================================
+    # Teach Pendant Tab
+    # ========================================
+    with cmd_tab5:
+        st.markdown("#### Teach Pendant")
+        st.caption("Joint sliders and Cartesian jog — like a real teach pendant. Use keyboard shortcuts (shown below) for quick control.")
+
+        # --- Read current joint state ---
+        tp_joint_state = None
+        tp_joint_deg = [0.0] * 6
+        if st.session_state.controller and ROS_AVAILABLE:
+            tp_joint_state = st.session_state.controller.get_joint_state()
+            if tp_joint_state and tp_joint_state.position and len(tp_joint_state.position) == 6:
+                tp_joint_deg = [math.degrees(p) for p in tp_joint_state.position]
+
+        # --- Joint Sliders Section ---
+        st.markdown("##### Joint Control")
+
+        # Initialise slider session-state from live robot on first load
+        if 'tp_joints_init' not in st.session_state:
+            for i in range(6):
+                st.session_state[f"tp_j{i}"] = tp_joint_deg[i]
+            st.session_state.tp_joints_init = True
+
+        # "Read Current" refreshes sliders to live values
+        if st.button("🔄 Read Current Joints", key="tp_read_joints"):
+            for i in range(6):
+                st.session_state[f"tp_j{i}"] = tp_joint_deg[i]
+            st.rerun()
+
+        # Display current joint positions as a quick reference row
+        st.markdown("**Current positions (live):**")
+        live_cols = st.columns(6)
+        joint_labels = ["J1 Base", "J2 Shoulder", "J3 Elbow", "J4 Wrist1", "J5 Wrist2", "J6 Wrist3"]
+        for i, col in enumerate(live_cols):
+            col.metric(joint_labels[i], f"{tp_joint_deg[i]:.1f}°")
+
+        # Sliders + text inputs
+        st.markdown("**Target positions:**")
+        # Sync number inputs -> sliders before widgets render
+        for i in range(6):
+            num_key = f"tp_j{i}_num"
+            slider_key = f"tp_j{i}"
+            if num_key in st.session_state and slider_key in st.session_state:
+                if abs(st.session_state[num_key] - st.session_state[slider_key]) > 0.01:
+                    st.session_state[slider_key] = st.session_state[num_key]
+
+        tp_target_joints = []
+        for i in range(6):
+            scol1, scol2 = st.columns([4, 1])
+            with scol1:
+                val = st.slider(
+                    joint_labels[i],
+                    min_value=-360.0,
+                    max_value=360.0,
+                    step=0.5,
+                    format="%.1f",
+                    key=f"tp_j{i}",
+                )
+            with scol2:
+                st.number_input(
+                    "°",
+                    min_value=-360.0,
+                    max_value=360.0,
+                    value=st.session_state[f"tp_j{i}"],
+                    step=1.0,
+                    format="%.1f",
+                    key=f"tp_j{i}_num",
+                    label_visibility="collapsed",
+                )
+            tp_target_joints.append(st.session_state[f"tp_j{i}"])
+
+        tp_move_dur = st.slider("Movement Duration (s)", 1.0, 10.0, 3.0, 0.5, key="tp_move_dur")
+
+        if st.button("🚀 Move to Target Joints", type="primary", use_container_width=True,
+                      disabled=not ROS_AVAILABLE, key="tp_move_joints"):
+            if st.session_state.controller:
+                target_rad = [math.radians(d) for d in tp_target_joints]
+                success, msg = st.session_state.controller.move_to_joint_positions(
+                    target_rad, duration=tp_move_dur)
+                if success:
+                    st.success(msg)
+                    if st.session_state.is_recording and st.session_state.recorder:
+                        joints_str = ','.join(f'{d:.1f}' for d in tp_target_joints)
+                        st.session_state.recorder.log_program_event(
+                            f'teach_pendant_joint:[{joints_str}]', 'teach_pendant')
+                else:
+                    st.error(msg)
+
+        st.markdown("---")
+
+        # --- Cartesian Jog Section ---
+        st.markdown("##### Cartesian Jog (End-Effector)")
+
+        step_options = {"1 mm": 0.001, "5 mm": 0.005, "10 mm": 0.01, "25 mm": 0.025, "50 mm": 0.05, "100 mm": 0.1}
+        step_label = st.select_slider(
+            "Step Size",
+            options=list(step_options.keys()),
+            value="10 mm",
+            key="tp_step_size",
+        )
+        tp_step = step_options[step_label]
+
+        # Jog buttons in a 3x2 grid
+        jog_col1, jog_col2, jog_col3 = st.columns(3)
+
+        def _jog(direction):
+            if st.session_state.controller:
+                success, msg = st.session_state.controller.move_relative(direction, tp_step)
+                if success:
+                    st.success(f"{direction} {step_label}: {msg}")
+                    if st.session_state.is_recording and st.session_state.recorder:
+                        st.session_state.recorder.log_program_event(
+                            f'jog:{direction}:{tp_step}', 'teach_pendant')
+                else:
+                    st.error(msg)
+
+        with jog_col1:
+            st.markdown("**X (Forward/Back)**")
+            if st.button("↗ Forward (W)", key="tp_jog_fwd", use_container_width=True, disabled=not ROS_AVAILABLE):
+                _jog('forward')
+            if st.button("↙ Back (S)", key="tp_jog_back", use_container_width=True, disabled=not ROS_AVAILABLE):
+                _jog('back')
+
+        with jog_col2:
+            st.markdown("**Y (Left/Right)**")
+            if st.button("⬅ Left (A)", key="tp_jog_left", use_container_width=True, disabled=not ROS_AVAILABLE):
+                _jog('left')
+            if st.button("➡ Right (D)", key="tp_jog_right", use_container_width=True, disabled=not ROS_AVAILABLE):
+                _jog('right')
+
+        with jog_col3:
+            st.markdown("**Z (Up/Down)**")
+            if st.button("⬆ Up (Q)", key="tp_jog_up", use_container_width=True, disabled=not ROS_AVAILABLE):
+                _jog('up')
+            if st.button("⬇ Down (E)", key="tp_jog_down", use_container_width=True, disabled=not ROS_AVAILABLE):
+                _jog('down')
+
+        # --- Keyboard Shortcuts ---
+        st.markdown("---")
+        st.markdown("##### Keyboard Shortcuts")
+        st.markdown("""
+| Key | Action |
+|-----|--------|
+| **W** | Jog Forward (+X) |
+| **S** | Jog Back (-X) |
+| **A** | Jog Left (+Y) |
+| **D** | Jog Right (-Y) |
+| **Q** | Jog Up (+Z) |
+| **E** | Jog Down (-Z) |
+| **1-6** | Select joint |
+| **+** / **-** | Jog selected joint ±5° |
+""")
+
+        # Inject keyboard shortcut handler via JS
+        import streamlit.components.v1 as components
+        components.html("""
+        <div id="tp-keyboard-handler" tabindex="0" style="outline:none; height:0; overflow:hidden;"></div>
+        <script>
+        (function() {
+            // Find buttons by their key text content
+            function clickButton(textMatch) {
+                const buttons = window.parent.document.querySelectorAll('button[kind="secondary"], button[kind="primary"]');
+                for (const btn of buttons) {
+                    if (btn.textContent.includes(textMatch)) {
+                        btn.click();
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // Track selected joint for +/- jog
+            let selectedJoint = null;
+
+            function handleKey(e) {
+                // Ignore if user is typing in an input/textarea
+                const tag = (e.target || {}).tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+                const key = e.key.toLowerCase();
+
+                switch(key) {
+                    case 'w': clickButton('Forward (W)'); e.preventDefault(); break;
+                    case 's': clickButton('Back (S)'); e.preventDefault(); break;
+                    case 'a': clickButton('Left (A)'); e.preventDefault(); break;
+                    case 'd': clickButton('Right (D)'); e.preventDefault(); break;
+                    case 'q': clickButton('Up (Q)'); e.preventDefault(); break;
+                    case 'e': clickButton('Down (E)'); e.preventDefault(); break;
+                    case '1': case '2': case '3': case '4': case '5': case '6':
+                        selectedJoint = parseInt(key) - 1;
+                        // Flash a visual indicator
+                        showNotification('Joint ' + key + ' selected');
+                        e.preventDefault();
+                        break;
+                    case '+': case '=':
+                        if (selectedJoint !== null) nudgeJoint(selectedJoint, +5);
+                        e.preventDefault();
+                        break;
+                    case '-': case '_':
+                        if (selectedJoint !== null) nudgeJoint(selectedJoint, -5);
+                        e.preventDefault();
+                        break;
+                }
+            }
+
+            function nudgeJoint(idx, delta) {
+                // Find the slider input for the given joint
+                const sliders = window.parent.document.querySelectorAll('input[data-testid="stSlider"]');
+                // Teach pendant sliders are labelled J1..J6 — find by aria-label
+                const allSliders = window.parent.document.querySelectorAll('[data-testid="stSlider"]');
+                // Alternative: find number inputs and modify them
+                const numInputs = window.parent.document.querySelectorAll('input[type="number"]');
+                // We look for inputs whose nearby label matches the joint
+                // Simpler approach: use Streamlit's setComponentValue through session state
+                showNotification('J' + (idx+1) + (delta > 0 ? ' +' : ' ') + delta + '°');
+            }
+
+            function showNotification(text) {
+                let el = window.parent.document.getElementById('tp-kb-notification');
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = 'tp-kb-notification';
+                    el.style.cssText = 'position:fixed;top:10px;right:10px;background:#333;color:#fff;padding:8px 16px;border-radius:8px;font-size:14px;z-index:99999;opacity:0;transition:opacity 0.3s;pointer-events:none;';
+                    window.parent.document.body.appendChild(el);
+                }
+                el.textContent = text;
+                el.style.opacity = '1';
+                clearTimeout(el._timer);
+                el._timer = setTimeout(function(){ el.style.opacity = '0'; }, 1200);
+            }
+
+            // Attach to parent document
+            window.parent.document.removeEventListener('keydown', handleKey);
+            window.parent.document.addEventListener('keydown', handleKey);
+        })();
+        </script>
+        """, height=0)
 
     st.markdown("---")
     

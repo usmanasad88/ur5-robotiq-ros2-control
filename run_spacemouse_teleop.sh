@@ -39,13 +39,11 @@ echo "Running UR5 SpaceMouse Teleop..."
 # Default arguments if none provided
 if [ $# -eq 0 ]; then
     echo "No arguments provided. Using defaults:"
-    echo "  -p scale_translation:=0.002"
-    echo "  -p scale_rotation:=0.01"
-    echo "  -p publish_rate:=10.0"
+    echo "  -p deadzone:=0.1"
+    echo "  -p publish_rate:=100.0"
     exec ros2 run ur5_spacemouse_teleop spacemouse_teleop_node --ros-args \
-        -p scale_translation:=0.002 \
-        -p scale_rotation:=0.01 \
-        -p publish_rate:=10.0
+        -p deadzone:=0.1 \
+        -p publish_rate:=100.0
 else
     echo "Arguments: $@"
     exec ros2 run ur5_spacemouse_teleop spacemouse_teleop_node --ros-args "$@"

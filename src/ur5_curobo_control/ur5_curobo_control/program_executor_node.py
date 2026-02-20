@@ -30,6 +30,8 @@ from scipy.spatial.transform import Rotation
 import os
 import sys
 import threading
+import yaml
+from ament_index_python.packages import get_package_share_directory
 import select
 import selectors
 import termios
@@ -119,7 +121,7 @@ class UR5ProgramExecutorNode(Node):
             ParameterDescriptor(description='Direction for relative move: left/right/forward/back/up/down'))
         self.declare_parameter('relative_move_distance', 0.05,
             ParameterDescriptor(description='Distance in meters for relative move (default 5cm)'))
-        
+
         robot_config_file = self.get_parameter('robot_config_file').value
         self.use_fake_hardware = self.get_parameter('use_fake_hardware').value
         world_config_file = self.get_parameter('world_config_file').value
@@ -206,13 +208,27 @@ class UR5ProgramExecutorNode(Node):
         self.max_sub_program_depth = 10
         self.current_sub_program_depth = 0
 
-        # Teleop state (SpaceMouse / keyboard / VR delta control)
-        self._teleop_target_pos: Optional[list] = None   # [x, y, z] meters
-        self._teleop_target_quat: Optional[list] = None  # [w, x, y, z]
+        # Teleop state (SpaceMouse jog control)
         self._teleop_replan_timer = None
         self._teleop_sub = None
         self._teleop_lock = threading.Lock()
-        self._teleop_dirty = False  # True when new deltas have arrived since last replan
+        # Latest raw axis values from spacemouse, each in [-1, 1]; None = at rest
+        self._teleop_axis: Optional[PoseDelta] = None
+
+        # Teleop config — loaded from teleop_config.yaml, reloaded on file change
+        self._teleop_config_path = os.path.join(
+            get_package_share_directory('ur5_curobo_control'), 'config', 'teleop_config.yaml'
+        )
+        self._teleop_config_mtime = None
+        self.teleop_jog_linear = 0.05
+        self.teleop_jog_angular = 0.3
+        self.teleop_replan_period = 0.1
+        self.teleop_axis_threshold = 0.05
+        self._load_teleop_config()
+        self._teleop_planning = False  # True while a jog plan is running in background
+
+        # Watch the config file for changes every 2 seconds
+        self._teleop_config_watch_timer = self.create_timer(2.0, self._check_teleop_config)
 
         # ROS Interfaces
         self._setup_subscribers()
@@ -247,6 +263,36 @@ class UR5ProgramExecutorNode(Node):
         
         self.get_logger().info("UR5 Program Executor Node initialized")
     
+    def _load_teleop_config(self):
+        """Load teleop jog settings from teleop_config.yaml."""
+        path = os.path.realpath(self._teleop_config_path)
+        try:
+            with open(path, 'r') as f:
+                cfg = yaml.safe_load(f) or {}
+            self.teleop_jog_linear     = float(cfg.get('teleop_jog_linear',     self.teleop_jog_linear))
+            self.teleop_jog_angular    = float(cfg.get('teleop_jog_angular',    self.teleop_jog_angular))
+            self.teleop_replan_period  = float(cfg.get('teleop_replan_period',  self.teleop_replan_period))
+            self.teleop_axis_threshold = float(cfg.get('teleop_axis_threshold', self.teleop_axis_threshold))
+            self._teleop_config_mtime  = os.path.getmtime(path)
+            self.get_logger().info(
+                f"Teleop config loaded: linear={self.teleop_jog_linear} m/s, "
+                f"angular={self.teleop_jog_angular} rad/s, "
+                f"period={self.teleop_replan_period} s, "
+                f"threshold={self.teleop_axis_threshold}"
+            )
+        except Exception as e:
+            self.get_logger().warn(f"Could not load teleop_config.yaml: {e} — using defaults")
+
+    def _check_teleop_config(self):
+        """Reload teleop_config.yaml if it has been modified."""
+        path = os.path.realpath(self._teleop_config_path)
+        try:
+            mtime = os.path.getmtime(path)
+            if mtime != self._teleop_config_mtime:
+                self._load_teleop_config()
+        except Exception:
+            pass
+
     def _on_parameter_change(self, params):
         """Callback when parameters are changed externally (e.g. via API)."""
         from rcl_interfaces.msg import SetParametersResult
@@ -1142,7 +1188,7 @@ class UR5ProgramExecutorNode(Node):
                 self._teleop_target_quat = ee_quat
                 self._teleop_dirty = False
 
-            # Subscribe to teleop deltas and start replan timer
+            # Subscribe to teleop axis values and start jog timer
             if self._teleop_sub is None:
                 self._teleop_sub = self.create_subscription(
                     PoseDelta,
@@ -1153,14 +1199,14 @@ class UR5ProgramExecutorNode(Node):
                 )
             if self._teleop_replan_timer is None:
                 self._teleop_replan_timer = self.create_timer(
-                    0.1,  # 10 Hz
+                    self.teleop_replan_period,
                     self._teleop_replan_callback,
                     callback_group=self.callback_group
                 )
 
             self.state = ExecutorState.TELEOP
             self.get_logger().info(
-                f"Teleop mode enabled. Target: pos={[f'{v:.4f}' for v in ee_pos]}"
+                f"Teleop jog mode enabled. EE at pos={[f'{v:.4f}' for v in ee_pos]}"
             )
             response.success = True
             response.message = "Teleop mode enabled"
@@ -1188,98 +1234,127 @@ class UR5ProgramExecutorNode(Node):
             self.destroy_subscription(self._teleop_sub)
             self._teleop_sub = None
         with self._teleop_lock:
-            self._teleop_target_pos = None
-            self._teleop_target_quat = None
-            self._teleop_dirty = False
+            self._teleop_axis = None
 
     def _teleop_delta_callback(self, msg: PoseDelta):
-        """Accumulate incoming PoseDelta into the teleop target pose."""
+        """Store the latest spacemouse axis values for the jog timer to consume."""
         if self.state != ExecutorState.TELEOP:
-            return
-
-        with self._teleop_lock:
-            if self._teleop_target_pos is None or self._teleop_target_quat is None:
-                return
-
-            has_translation = (msg.dx != 0.0 or msg.dy != 0.0 or msg.dz != 0.0)
-            has_rotation = (msg.droll != 0.0 or msg.dpitch != 0.0 or msg.dyaw != 0.0)
-
-            if not has_translation and not has_rotation:
-                # Zero delta — spacemouse is at rest; no replan needed
-                return
-
-            # Accumulate translation
-            self._teleop_target_pos[0] += msg.dx
-            self._teleop_target_pos[1] += msg.dy
-            self._teleop_target_pos[2] += msg.dz
-
-            # Accumulate rotation via quaternion composition: q_new = delta_q * q_current
-            # msg: droll=Rx, dpitch=Ry, dyaw=Rz (intrinsic XYZ, small angles from spacemouse)
-            if has_rotation:
-                delta_rot = Rotation.from_euler('xyz', [msg.droll, msg.dpitch, msg.dyaw])
-                # Current quat is [w, x, y, z] (cuRobo convention)
-                qw, qx, qy, qz = self._teleop_target_quat
-                current_rot = Rotation.from_quat([qx, qy, qz, qw])  # scipy: [x,y,z,w]
-                new_rot = delta_rot * current_rot
-                qx, qy, qz, qw = new_rot.as_quat()  # scipy returns [x,y,z,w]
-                self._teleop_target_quat = [qw, qx, qy, qz]
-
-            # Signal that there is a new target to plan towards
-            self._teleop_dirty = True
-
-            self.get_logger().info(
-                f"Teleop delta received: dx={msg.dx:.6f} dy={msg.dy:.6f} dz={msg.dz:.6f} "
-                f"→ target=[{self._teleop_target_pos[0]:.4f}, {self._teleop_target_pos[1]:.4f}, {self._teleop_target_pos[2]:.4f}]"
+            self.get_logger().warn(
+                f"Received teleop delta but state is {self.state} — ignoring"
             )
+            return
+        self.get_logger().info(
+            f'JOG recv  dx={msg.dx:+.3f} dy={msg.dy:+.3f} dz={msg.dz:+.3f} '
+            f'dr={msg.droll:+.3f} dp={msg.dpitch:+.3f} dyw={msg.dyaw:+.3f}'
+        )
+        with self._teleop_lock:
+            self._teleop_axis = msg
 
     def _teleop_replan_callback(self):
-        """Plan a motion to the accumulated teleop target pose, only when new deltas arrived."""
+        """Jog the robot one step in the direction the spacemouse is currently held."""
         if self.state != ExecutorState.TELEOP:
             return
-
         if self.current_joint_state is None:
+            self.get_logger().warn("Teleop jog: no joint state yet")
+            return
+
+        # Skip this tick if the previous plan is still running
+        if self._teleop_planning:
+            self.get_logger().info('JOG skip — previous plan still in flight')
             return
 
         with self._teleop_lock:
-            if not self._teleop_dirty:
-                # No new input since last replan — leave in-flight trajectory alone
-                return
-            if self._teleop_target_pos is None or self._teleop_target_quat is None:
-                return
-            target_pos = list(self._teleop_target_pos)
-            target_quat = list(self._teleop_target_quat)
-            self._teleop_dirty = False  # Clear before releasing lock
+            axis = self._teleop_axis
+
+        # No axis data yet, or spacemouse at rest (all zeros) — nothing to do
+        if axis is None:
+            return
+        is_zero = (axis.dx == 0.0 and axis.dy == 0.0 and axis.dz == 0.0 and
+                   axis.droll == 0.0 and axis.dpitch == 0.0 and axis.dyaw == 0.0)
+        if is_zero:
+            return
+
+        # Use the accumulated target pose rather than FK of current joints.
+        # Planning from FK introduces snap-back: if the previous trajectory hasn't
+        # finished executing, current_joint_state is still behind, so the new target
+        # is computed from a stale position and the robot lurches when the controller
+        # catches up.
+        with self._teleop_lock:
+            cur_pos  = list(self._teleop_target_pos)
+            cur_quat = list(self._teleop_target_quat)
+
+        thr = self.teleop_axis_threshold
+        dt  = self.teleop_replan_period
+
+        # Compute jog steps per active axis
+        step_x = axis.dx * self.teleop_jog_linear * dt if abs(axis.dx) > thr else 0.0
+        step_y = axis.dy * self.teleop_jog_linear * dt if abs(axis.dy) > thr else 0.0
+        step_z = axis.dz * self.teleop_jog_linear * dt if abs(axis.dz) > thr else 0.0
+        roll_step  = axis.droll  * self.teleop_jog_angular * dt if abs(axis.droll)  > thr else 0.0
+        pitch_step = axis.dpitch * self.teleop_jog_angular * dt if abs(axis.dpitch) > thr else 0.0
+        yaw_step   = axis.dyaw   * self.teleop_jog_angular * dt if abs(axis.dyaw)   > thr else 0.0
+
+        target_pos = [cur_pos[0] + step_x, cur_pos[1] + step_y, cur_pos[2] + step_z]
+
+        has_rotation = (roll_step != 0.0 or pitch_step != 0.0 or yaw_step != 0.0)
+        if has_rotation:
+            delta_rot = Rotation.from_euler('xyz', [roll_step, pitch_step, yaw_step])
+            qw, qx, qy, qz = cur_quat  # cuRobo: [w, x, y, z]
+            cur_rot = Rotation.from_quat([qx, qy, qz, qw])  # scipy: [x, y, z, w]
+            new_rot = delta_rot * cur_rot
+            qx, qy, qz, qw = new_rot.as_quat()
+            target_quat = [qw, qx, qy, qz]
+        else:
+            target_quat = cur_quat
+
+        # Commit the new accumulated target before spawning the planning thread
+        with self._teleop_lock:
+            self._teleop_target_pos  = target_pos
+            self._teleop_target_quat = target_quat
 
         self.get_logger().info(
-            f"Teleop replanning → target pos=[{target_pos[0]:.4f},{target_pos[1]:.4f},{target_pos[2]:.4f}]"
+            f'JOG step  thr={thr}  '
+            f'x={step_x:+.4f} y={step_y:+.4f} z={step_z:+.4f}  '
+            f'roll={roll_step:+.4f} pitch={pitch_step:+.4f} yaw={yaw_step:+.4f}  '
+            f'target=[{target_pos[0]:.4f},{target_pos[1]:.4f},{target_pos[2]:.4f}]'
         )
 
+        # Snapshot joint state for the planning thread
+        joint_state_snapshot = self.current_joint_state.clone()
+
+        self._teleop_planning = True
+        t = threading.Thread(
+            target=self._teleop_plan_and_publish,
+            args=(target_pos, target_quat, joint_state_snapshot),
+            daemon=True
+        )
+        t.start()
+
+    def _teleop_plan_and_publish(self, target_pos, target_quat, joint_state):
+        """Run cuRobo planning in a background thread and publish if successful."""
         try:
             target_pose = CuroboPose(
                 position=torch.tensor(target_pos, device=self.tensor_args.device,
                                       dtype=self.tensor_args.dtype),
                 quaternion=torch.tensor(target_quat, device=self.tensor_args.device,
-                                        dtype=self.tensor_args.dtype)
+                                        dtype=self.tensor_args.dtype),
             )
-            start_state = CuroboJointState.from_position(
-                self.current_joint_state.view(1, -1)
-            )
+            start_state = CuroboJointState.from_position(joint_state.view(1, -1))
             result = self.motion_gen.plan_single(
                 start_state, target_pose,
-                MotionGenPlanConfig(enable_graph=False, timeout=2.0)
+                MotionGenPlanConfig(enable_graph=False, timeout=0.5)
             )
             if result.success.item():
                 traj = result.get_interpolated_plan()
                 steps = traj.position.shape[1] if len(traj.position.shape) > 2 else traj.position.shape[0]
+                self.get_logger().info(f'JOG plan OK ({steps} steps) → publishing trajectory')
                 self._publish_teleop_trajectory(traj)
-                self.get_logger().info(
-                    f"Teleop replan OK ({steps} steps) → "
-                    f"pos=[{target_pos[0]:.4f},{target_pos[1]:.4f},{target_pos[2]:.4f}]"
-                )
             else:
-                self.get_logger().warn(f"Teleop replan FAILED: {result.status}")
+                self.get_logger().warn(f"Teleop jog plan failed: {result.status}")
         except Exception as e:
-            self.get_logger().error(f"Teleop replan error: {e}")
+            self.get_logger().error(f"Teleop jog error: {e}")
+        finally:
+            self._teleop_planning = False
 
     def _publish_teleop_trajectory(self, traj):
         """Publish a trajectory with positions AND velocities for teleop.
@@ -1901,7 +1976,9 @@ class UR5ProgramExecutorNode(Node):
         """Publish trajectory to robot controller."""
         traj_msg = JointTrajectory()
         traj_msg.joint_names = self.joint_names
-        traj_msg.header.stamp = self.get_clock().now().to_msg()
+        # Leave header.stamp at zero so the controller treats it as "start now".
+        # Setting a specific timestamp can cause the controller to silently reject
+        # the trajectory if the stamp is in the past by the time it's received.
 
         # Handle JointState object or tensor; extract velocities if available
         if hasattr(traj_input, 'position'):
