@@ -32,8 +32,11 @@ class WorkspaceMarkersPublisher(Node):
     # Default objects — edit here to add/remove meshes.
     # Each: (name, glb_file, x, y, z, roll, pitch, yaw, sx, sy, sz)
     DEFAULTS = [
-        ("table",  "table.glb",      0.0, -1.0, -0.2,  90.0, 0.0, 0.0,  1.0, 1.0, 1.0),
-        ("base",   "robot_base.glb", 0.0,  0.0, -0.1,  90.0, 0.0, 0.0,  0.8, 0.8, 0.8),
+        ("table1", "table.glb",      0.547, -0.371, -0.5,  90.0, 0.0, 0.0,  1.0, 1.0, 1.0),
+        ("table2", "table.glb",      0.684,  0.474, -0.5,  90.0, 0.0, 90.0, 1.0, 1.0, 1.0),
+        ("base",   "robot_base.glb", 0.0,    0.0,   -0.1,  90.0, 0.0, 0.0,  0.8, 0.8, 0.8),
+        ("bottle", "bottle.glb",     0.6,   -0.2,   -0.5,  90.0, 0.0, 0.0,  0.4, 0.4, 0.4),
+        ("roller", "roller.glb",     0.6,   -0.6,   -0.5,  90.0, 0.0, 0.0,  0.4, 0.4, 0.4),
     ]
 
     PARAM_KEYS = ("x", "y", "z", "roll", "pitch", "yaw", "scale_x", "scale_y", "scale_z")

@@ -21,14 +21,7 @@ joint Stowed 0.0 -134.6 119.7 -165.0 -90.0 0.0
 # ============================================
 # Common Workspace Poses (Cartesian)
 # ============================================
-# Above table center - good neutral position
 pose neutral 0.4 0.0 0.4 0.0 1.0 0.0 0.0
-
-# Above table - left side
-pose TableLeft 0.4 0.3 0.4 0.0 1.0 0.0 0.0
-
-# Above table - right side
-pose TableRight 0.4 -0.3 0.4 0.0 1.0 0.0 0.0
 
 pose TableRightCorner 0.9011 0.11913 -0.48926 0.6843 -0.3948 0.3136 -0.5268
 pose TableLeftCorner 0.19328 -0.86167 -0.50626 0.17507 -0.81920 0.54128 -0.07273
@@ -39,21 +32,30 @@ pose TableLeftCorner 0.19328 -0.86167 -0.50626 0.17507 -0.81920 0.54128 -0.07273
 # Lab Positions
 # ============================================
 
-joint Above_Bottle_Resin_Storage -27.4 -40.3 95 124 -90 0
-joint Bottle_Resin_Storage -27.4 -27.23 91 121 -90 0
+#Resin Storage
+joint Above_Bottle_Resin_Storage 7.41 -31.11 61.81 155.36 -132.89 8.94
+joint Bottle_Resin_Storage 7.41 -17.91 63.97 140.93 -128.58 8.65
 
-joint Above_Bottle_Hardener_Storage -9.4 -33.23 76.61 139.04 -115.9 0
-joint Bottle_Hardener_Storage -11.27 -25.22 78.85 136.04 -111.82 0
+#Hardener Storage
+joint Above_Bottle_Hardener_Storage 0 -42.31 86.12 136.65 -124.07 0
+joint Bottle_Hardener_Storage 0 -26.49 86.12 130.20 -122.59 0
 
-joint Bottle_Resin_Workspace 16.25 -7.1 40.43 152.85 -58.29 -5.29
-joint Bottle_Hardener_Workspace 33.15 -18.70 71.4 130 -70 0
+#Resin Workspace
+joint Above_Bottle_Resin_Workspace 91.2 -27.34 56.58 150 -127.18 0
+joint Bottle_Resin_Workspace 91.19 -12.34 51.65 137.28 -127.07 0
 
-joint above_roller_pick_position -18 -53.68 105.9 126.32 -99.35 0.25 
-joint roller_pick_position -18 -45 105.9 117.89 -99.35 0.25 
+#Hardener
+joint Above_Bottle_Hardener_Workspace 69.08 -53.13 103.8 116 -100.59 0
+joint Bottle_Hardener_Workspace 69.08 -29.34 99.55 105.55 -100.59 0
 
-joint above_roller_place_position 62.35 -41.45 98.55 121.5 102.14 -0.34
-joint roller_place_position 63 -21.45 88.55 111.5 102.14 -0.34
+#Roller Positions
+joint Roller_Storage_Above -35.23 -85.48 90.47 245.09 -84.48 0
+joint Roller_Storage_Pick -35.23 -85.48 90.47 245.09 -84.48 0
 
+joint Roller_Workplace_Above 44.93 -56 18.62 309.3 -86 0
+joint Roller_Workplace_Pick 42.88 -30.42 47.35 254.62 -84.46 0
+
+#Table
 joint table_far_corner 78.33 -18.72 76.69 141 -50.6 -13.43
 joint table_near_corner -0.87 -25.75 88.17 142.96 -71.27 -13.42
 
@@ -75,3 +77,5 @@ pose InspectAngled 0.35 0.15 0.35 0.0 0.924 0.383 0.0
 # ============================================
 # Saved at 2026-02-13 07:13:42 (corrected from radians to degrees)
 joint position_1 0.00 -90.00 90.00 -90.00 -90.00 0.00
+
+

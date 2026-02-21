@@ -1,0 +1,72 @@
+# ============================================
+# Move Roller from Workplace to Storage - Robot Program
+# ============================================
+# This program picks up the roller from the workpiece
+# position and returns it to storage using named
+# joint positions.
+# ============================================
+
+# Set a moderate speed for safe operation
+set_speed(0.5)
+
+# -----------------------------------------
+# Phase 1: Move to Home Position
+# -----------------------------------------
+movetonamed(Home)
+wait(1.0)
+
+# Ensure gripper is open before approaching roller
+opengripper
+wait(0.5)
+
+# -----------------------------------------
+# Phase 2: Approach and Pick Roller from Workplace
+# -----------------------------------------
+# Move to a safe position above the roller
+movetonamed(above_roller_place_position)
+wait(0.5)
+
+# Lower to grasp the roller
+movetonamed(roller_place_position)
+wait(0.3)
+
+# Grasp Roller
+closegripper
+wait(1.0)
+
+# -----------------------------------------
+# Phase 3: Lift and Move to Storage Area
+# -----------------------------------------
+# Lift the roller straight up
+movetonamed(above_roller_place_position)
+wait(0.5)
+
+# Move to a safe 'above' position for storage
+movetonamed(above_roller_pick_position)
+wait(0.5)
+
+# -----------------------------------------
+# Phase 4: Place Roller at Storage Position
+# -----------------------------------------
+# Lower to the storage position
+movetonamed(roller_pick_position)
+wait(0.3)
+
+# Release Roller
+opengripper
+wait(1.0)
+
+# -----------------------------------------
+# Phase 5: Retreat and Return Home
+# -----------------------------------------
+# Retreat straight up
+movetonamed(above_roller_pick_position)
+wait(0.5)
+
+# Return to Home position
+movetonamed(Home)
+wait(0.5)
+
+# Program complete!
+# The roller has been returned to storage.
+
