@@ -31,9 +31,12 @@ def generate_launch_description():
         description='Path to cuRobo world config YAML'
     )
     
+    # Point directly at source tree so edits take effect without rebuilding
+    src_programs_dir = '/home/rml/ur5-robotiq-ros2-control/src/ur5_curobo_control/programs'
+
     declare_programs_dir = DeclareLaunchArgument(
         'programs_directory',
-        default_value=PathJoinSubstitution([pkg_share, 'programs']),
+        default_value=src_programs_dir,
         description='Directory containing robot program files'
     )
     

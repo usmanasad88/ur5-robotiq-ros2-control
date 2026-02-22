@@ -12,22 +12,31 @@ set_speed(0.5)
 # -----------------------------------------
 # Phase 1: Move to Home Position
 # -----------------------------------------
-movetonamed(Home)
-wait(1.0)
+# Skip if already at Home
+if near(Home)
+  wait(0.1)
+else
+  movetonamed(Home)
+  wait(1.0)
+endif
 
 # Ensure gripper is open before approaching roller
-opengripper
-wait(0.5)
+if gripper_open
+  wait(0.1)
+else
+  opengripper
+  wait(0.5)
+endif
 
 # -----------------------------------------
 # Phase 2: Approach and Pick Roller from Storage
 # -----------------------------------------
 # Move to a safe position above the roller
-movetonamed(above_roller_pick_position)
+movetonamed(Roller_Storage_Above)
 wait(0.5)
 
 # Lower to grasp the roller
-movetonamed(roller_pick_position)
+movetonamed(Roller_Storage_Pick)
 wait(0.3)
 
 # Grasp Roller
@@ -38,18 +47,19 @@ wait(1.0)
 # Phase 3: Lift and Move to Workpiece Area
 # -----------------------------------------
 # Lift the roller straight up
-movetonamed(above_roller_pick_position)
+movetonamed(Roller_Storage_Above)
+movetonamed(Home)
 wait(0.5)
 
 # Move to a safe 'above' position for placing
-movetonamed(above_roller_place_position)
+movetonamed(Roller_Workplace_Above)
 wait(0.5)
 
 # -----------------------------------------
 # Phase 4: Place Roller at Workpiece Position
 # -----------------------------------------
 # Lower to the workpiece position
-movetonamed(roller_place_position)
+movetonamed(Roller_Workplace_Pick)
 wait(0.3)
 
 # Release Roller
@@ -60,7 +70,7 @@ wait(0.5)
 # Phase 5: Retreat and Return Home
 # -----------------------------------------
 # Retreat straight up
-movetonamed(above_roller_place_position)
+movetonamed(Roller_Workplace_Above)
 wait(0.5)
 
 # Return to Home position
@@ -69,4 +79,3 @@ wait(0.5)
 
 # Program complete!
 # The roller is now at the workpiece position.
-

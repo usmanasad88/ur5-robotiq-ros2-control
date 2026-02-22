@@ -65,6 +65,10 @@ tmux new-window -t "$SESSION" -n "cuRobo" \
 tmux new-window -t "$SESSION" -n "Executor" \
     "echo '[Executor] Waiting 4s...'; sleep 4; echo '[Executor] Starting program executor...'; \"$SCRIPT_DIR/run_program_executor.sh\"; exec bash"
 
+# Window: External Control API
+tmux new-window -t "$SESSION" -n "API" \
+    "echo '[API] Waiting 6s...'; sleep 6; echo '[API] Starting External Control API...'; \"$SCRIPT_DIR/run_external_api.sh\"; exec bash"
+
 # Window: Streamlit UI
 if [ "$LAUNCH_UI" = true ]; then
     tmux new-window -t "$SESSION" -n "UI" \
@@ -74,8 +78,13 @@ fi
 # Select the first window
 tmux select-window -t "$SESSION:0"
 
-# ---- Open gnome-terminal attached to the tmux session ------------------
-gnome-terminal --title="UR5 Control" -- tmux attach-session -t "$SESSION" 2>/dev/null
+# ---- Open gnome-terminal attached to the tmux session -------------------
+# Strip snap/VSCode environment variables that break gnome-terminal when
+# this script is launched from the VS Code integrated terminal.
+env -u GIO_MODULE_DIR -u GDK_PIXBUF_MODULE_FILE -u GDK_PIXBUF_MODULEDIR \
+    -u GTK_PATH -u GTK_EXE_PREFIX -u GTK_IM_MODULE_FILE \
+    -u LOCPATH -u SNAP_LIBRARY_PATH -u GSETTINGS_SCHEMA_DIR \
+    gnome-terminal --title="UR5 Control" -- tmux attach-session -t "$SESSION"
 
 echo ""
 echo "tmux session '$SESSION' running."

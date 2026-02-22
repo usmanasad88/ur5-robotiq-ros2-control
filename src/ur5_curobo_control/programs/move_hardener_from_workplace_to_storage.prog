@@ -12,12 +12,21 @@ set_speed(0.5)
 # -----------------------------------------
 # Phase 1: Move to Home Position
 # -----------------------------------------
-movetonamed(Home)
-wait(1.0)
+# Skip if already at Home
+if near(Home)
+  wait(0.1)
+else
+  movetonamed(Home)
+  wait(1.0)
+endif
 
 # Ensure gripper is open before approaching bottle
-opengripper
-wait(0.5)
+if gripper_open
+  wait(0.1)
+else
+  opengripper
+  wait(0.5)
+endif
 
 # -----------------------------------------
 # Phase 2: Pick Bottle from Workplace
@@ -29,6 +38,7 @@ wait(0.3)
 closegripper
 wait(1.0)
 movetonamed(Above_Bottle_Hardener_Workspace)
+movetonamed(Home)
 wait(0.5)
 
 # -----------------------------------------
@@ -50,4 +60,3 @@ movetonamed(Home)
 wait(0.5)
 
 # Program complete!
-

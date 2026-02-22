@@ -1420,7 +1420,7 @@ class UR5ProgramExecutorNode(Node):
         # Handle conditional blocks
         if instruction.type == InstructionType.IF:
             condition_result = self._evaluate_condition(instruction)
-            self.get_logger().info(f"Evaluating [{self.current_instruction_idx + 1}/{len(self.current_program)}]: {instruction.raw_line} => {condition_result}")
+            self.get_logger().info(f"Evaluating [step {self.current_instruction_idx + 1}/{len(self.current_program)}, line {instruction.line_number}]: {instruction.raw_line} => {condition_result}")
             if not condition_result:
                 # Skip to matching else or endif
                 self._skip_to_else_or_endif()
@@ -1439,7 +1439,7 @@ class UR5ProgramExecutorNode(Node):
             self.current_instruction_idx += 1
             return
         
-        self.get_logger().info(f"Executing [{self.current_instruction_idx + 1}/{len(self.current_program)}]: {instruction.raw_line}")
+        self.get_logger().info(f"Executing [step {self.current_instruction_idx + 1}/{len(self.current_program)}, line {instruction.line_number}]: {instruction.raw_line}")
         
         success = self.execute_instruction(instruction)
         
