@@ -18,7 +18,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION="ur5"
 
-USE_FAKE="false"
+USE_FAKE="true"
 LAUNCH_UI=true
 
 for arg in "$@"; do
