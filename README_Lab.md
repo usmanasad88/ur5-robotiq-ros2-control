@@ -59,3 +59,15 @@ A. In the moveit nodes rviz window (background node 2 rviz window). Go to panels
 A. Simply add you ```model_id``` and ```api_key``` of the roboflow project to the ```move_group_publisher.py``` in the ```detection_publisher_1/src/detection_publisher/detection_publisher``` folder under the header ```#Initialize the Roboflow model``` and rebuild.
 ### Q. I made changes to some code/ implemented a new function however its not working when running the nodes.
 A. Always rebuild the nodes when finalizing any new changes. Go to ```ur5_ws``` and enter ```colcon build``` and then ```source install/setup.bash```.
+
+### VR testing
+# Install dependencies
+pip install ur-rtde
+pip install git+https://github.com/rail-berkeley/oculus_reader.git
+sudo apt install android-tools-adb
+
+# Build (only needed once)
+cd ~/Repos/ur_ws && colcon build --packages-select ur5_vr_teleop
+
+# Run (robot IP auto-detected from script, or override)
+ROBOT_IP=172.17.66.105 ./run_quest_rtde_teleop.sh

@@ -1,0 +1,30 @@
+[package]
+version = "1.0.0"
+category = "Simulation"
+title = "UR5 HCDT"
+description = "UR5/UR10 with Robotiq gripper — ROS 2 joint-state follower and VLA control (HCDT)."
+authors = ["Mani"]
+repository = "https://github.com/your-org/ur_ws"
+keywords = ["ur5", "ur10", "robotiq", "cortex", "ros2", "manipulation"]
+changelog = "docs/CHANGELOG.md"
+readme = "docs/README.md"
+writeTarget.kit = true
+
+[dependencies]
+"isaacsim.core.api" = {}
+"isaacsim.core.prims" = {}
+"isaacsim.cortex.behaviors" = {}
+"isaacsim.cortex.framework" = {}
+"isaacsim.examples.browser" = {}
+"isaacsim.examples.extension" = {}
+"isaacsim.examples.interactive" = {}
+"isaacsim.gui.components" = {}
+"isaacsim.robot.manipulators" = {}
+"isaacsim.robot.manipulators.examples" = {}
+"isaacsim.robot_motion.motion_generation" = {}
+"isaacsim.storage.native" = {}
+"omni.kit.uiapp" = {}
+"omni.physx" = {}
+
+[[python.module]]
+name = "ur_robotiq_cortex"

@@ -1,0 +1,1 @@
+Move the gripper to the position of the green box

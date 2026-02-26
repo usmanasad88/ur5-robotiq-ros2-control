@@ -17,27 +17,25 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 1. Patch the shebang in the installed node scripts to use /usr/bin/env python3
-#    This makes it portable across different users and finds python3 in PATH
+# 1. Find the conda Python with PyTorch/cuRobo (same logic as run_curobo.sh)
+if [ -f "$HOME/miniconda3/envs/ur5_python/bin/python" ]; then
+    PYTHON_EXE="$HOME/miniconda3/envs/ur5_python/bin/python"
+elif [ -f "$HOME/anaconda3/envs/ur5_python/bin/python" ]; then
+    PYTHON_EXE="$HOME/anaconda3/envs/ur5_python/bin/python"
+else
+    PYTHON_EXE=$(which python3)
+    echo "Warning: ur5_python conda env not found, using $PYTHON_EXE (torch/cuRobo may be missing)"
+fi
+
+# 2. Patch the shebang to the absolute conda Python path so the node finds torch/cuRobo
+#    regardless of whether conda is active in the calling shell.
 EXECUTOR_SCRIPT="install/ur5_curobo_control/lib/ur5_curobo_control/program_executor_node"
 GESTURE_SCRIPT="install/ur5_curobo_control/lib/ur5_curobo_control/gesture_safety_monitor"
 if [ -f "$EXECUTOR_SCRIPT" ]; then
-    sed -i '1s|^.*$|#!/usr/bin/env python3|' "$EXECUTOR_SCRIPT"
+    sed -i "1s|^.*$|#!$PYTHON_EXE|" "$EXECUTOR_SCRIPT"
 fi
 if [ -f "$GESTURE_SCRIPT" ]; then
-    sed -i '1s|^.*$|#!/usr/bin/env python3|' "$GESTURE_SCRIPT"
-fi
-
-# 2. Activate conda environment for PyTorch/cuRobo support
-#    Detect conda installation for current user
-if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
-    source "$HOME/miniconda3/etc/profile.d/conda.sh"
-    conda activate ur5_python
-elif [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
-    source "$HOME/anaconda3/etc/profile.d/conda.sh"
-    conda activate ur5_python
-else
-    echo "Warning: Conda not found. PyTorch/cuRobo may not be available."
+    sed -i "1s|^.*$|#!$PYTHON_EXE|" "$GESTURE_SCRIPT"
 fi
 
 # 3. Export LD_PRELOAD to prevent GLIBCXX errors when using PyTorch/Curobo with ROS 2

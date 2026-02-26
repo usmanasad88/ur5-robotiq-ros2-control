@@ -37,6 +37,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64
+from std_srvs.srv import SetBool
 from ur5_teleop_msgs.msg import PoseDelta
 
 try:
@@ -147,6 +148,15 @@ class QuestTeleopNode(Node):
         # Max velocity clipping (same units as scaled deltas)
         self.declare_parameter('max_lin_delta', 0.5)
         self.declare_parameter('max_rot_delta', 0.5)
+        # auto_enable_teleop: call ~/set_teleop_mode True on the program_executor
+        # node when this node starts. Set to True when running against the sim
+        # (launch_all.sh fake hardware) — saves the manual service call step.
+        self.declare_parameter('auto_enable_teleop', False)
+        # Service name for the program executor teleop mode toggle.
+        self.declare_parameter(
+            'teleop_mode_service',
+            '/program_executor_node/set_teleop_mode'
+        )
 
         side = self.get_parameter('controller_side').value          # 'right' or 'left'
         self.cid = 'r' if side == 'right' else 'l'                 # 'r' or 'l'
@@ -157,6 +167,8 @@ class QuestTeleopNode(Node):
         reorder = self.get_parameter('rmat_reorder').value
         self.max_lin = self.get_parameter('max_lin_delta').value
         self.max_rot = self.get_parameter('max_rot_delta').value
+        auto_enable  = self.get_parameter('auto_enable_teleop').value
+        svc_name     = self.get_parameter('teleop_mode_service').value
 
         # Coordinate frame transform (applied after vr_to_global; matches DROID)
         self.global_to_env = vec_to_reorder_mat(reorder)
@@ -193,6 +205,43 @@ class QuestTeleopNode(Node):
         self.get_logger().info(f'  Rate       : {rate} Hz')
         self.get_logger().info('Hold GRIP button to move robot.')
         self.get_logger().info('Click JOYSTICK to reset forward direction.')
+
+        # --- Auto-enable cuRobo teleop mode (sim) ---
+        if auto_enable:
+            self._enable_teleop_mode(svc_name)
+
+    # ------------------------------------------------------------------
+    # cuRobo teleop mode auto-enable (sim only)
+    # ------------------------------------------------------------------
+
+    def _enable_teleop_mode(self, svc_name: str):
+        """Call set_teleop_mode(True) on the program_executor_node."""
+        self.get_logger().info(f'Calling {svc_name} (auto_enable_teleop=True) ...')
+        client = self.create_client(SetBool, svc_name)
+        # Wait up to 8 s for the service to come up (executor may still be starting)
+        if not client.wait_for_service(timeout_sec=8.0):
+            self.get_logger().warning(
+                f'Service {svc_name} not available after 8 s. '
+                'Start launch_all.sh first, or enable teleop mode manually:\n'
+                f'  ros2 service call {svc_name} std_srvs/srv/SetBool \'{{data: true}}\''
+            )
+            return
+        req = SetBool.Request()
+        req.data = True
+        future = client.call_async(req)
+        future.add_done_callback(self._teleop_enable_cb)
+
+    def _teleop_enable_cb(self, future):
+        try:
+            result = future.result()
+            if result.success:
+                self.get_logger().info('cuRobo teleop mode enabled successfully.')
+            else:
+                self.get_logger().warning(
+                    f'set_teleop_mode returned success=False: {result.message}'
+                )
+        except Exception as exc:
+            self.get_logger().warning(f'set_teleop_mode call failed: {exc}')
 
     # ------------------------------------------------------------------
     # Background reader thread

@@ -1,0 +1,1 @@
+from ur_robotiq_cortex.ur_robotiq_cortex_extension import URRobotiqCortexExtension

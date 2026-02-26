@@ -20,15 +20,21 @@ SESSION="ur5"
 
 USE_FAKE="true"
 LAUNCH_UI=true
+LAUNCH_QUEST=false
+LAUNCH_QUEST_SERVO=false
 
 for arg in "$@"; do
     case $arg in
-        --real|-r)  USE_FAKE="false" ;;
-        --no-ui)    LAUNCH_UI=false ;;
+        --real|-r)         USE_FAKE="false" ;;
+        --no-ui)           LAUNCH_UI=false ;;
+        --quest|-q)        LAUNCH_QUEST=true ;;
+        --quest-servo|-qs) LAUNCH_QUEST_SERVO=true ;;
         --help|-h)
-            echo "Usage: $0 [--real] [--no-ui]"
-            echo "  --real, -r   Use real robot hardware + gripper adapter"
-            echo "  --no-ui      Skip launching the Streamlit UI"
+            echo "Usage: $0 [--real] [--no-ui] [--quest] [--quest-servo]"
+            echo "  --real, -r        Use real robot hardware + gripper adapter"
+            echo "  --no-ui           Skip launching the Streamlit UI"
+            echo "  --quest, -q       Quest sim teleop via cuRobo (PoseDelta, jerky)"
+            echo "  --quest-servo,-qs Quest sim teleop via Jacobian IK velocity (smooth)"
             exit 0
             ;;
     esac
@@ -40,7 +46,7 @@ if ! command -v tmux &>/dev/null; then
     exit 1
 fi
 
-echo "Launching UR5 services  (fake=$USE_FAKE, ui=$LAUNCH_UI)"
+echo "Launching UR5 services  (fake=$USE_FAKE, ui=$LAUNCH_UI, quest=$LAUNCH_QUEST)"
 
 # Kill any stale session from a previous run
 tmux kill-session -t "$SESSION" 2>/dev/null
@@ -73,6 +79,25 @@ tmux new-window -t "$SESSION" -n "API" \
 if [ "$LAUNCH_UI" = true ]; then
     tmux new-window -t "$SESSION" -n "UI" \
         "echo '[UI] Waiting 6s...'; sleep 6; echo '[UI] Starting Streamlit UI...'; \"$SCRIPT_DIR/run_program_ui.sh\"; exec bash"
+fi
+
+# Window: Quest 3S sim teleop via cuRobo/PoseDelta (--quest)
+if [ "$LAUNCH_QUEST" = true ] && [ "$USE_FAKE" = "true" ]; then
+    tmux new-window -t "$SESSION" -n "Quest-Teleop" \
+        "echo '[Quest] Waiting 10s for cuRobo executor...'; sleep 10; echo '[Quest] Starting Quest 3S sim teleop...'; \"$SCRIPT_DIR/run_quest_sim_teleop.sh\"; exec bash"
+elif [ "$LAUNCH_QUEST" = true ] && [ "$USE_FAKE" = "false" ]; then
+    echo "NOTE: --quest uses the ROS 2 / cuRobo path (sim only)."
+    echo "      For real robot teleop use: bash run_quest_rtde_teleop.sh"
+fi
+
+# Window: Quest 3S servo teleop via Jacobian IK velocity control (--quest-servo)
+# Smoother than cuRobo — no trajectory replanning, direct 50 Hz velocity streaming.
+if [ "$LAUNCH_QUEST_SERVO" = true ] && [ "$USE_FAKE" = "true" ]; then
+    tmux new-window -t "$SESSION" -n "Quest-Servo" \
+        "echo '[Quest-Servo] Waiting 5s for UR5 driver...'; sleep 5; echo '[Quest-Servo] Starting Quest servo teleop...'; \"$SCRIPT_DIR/run_quest_servo_teleop.sh\"; exec bash"
+elif [ "$LAUNCH_QUEST_SERVO" = true ] && [ "$USE_FAKE" = "false" ]; then
+    echo "NOTE: --quest-servo targets the sim velocity controller (sim only)."
+    echo "      For real robot teleop use: bash run_quest_rtde_teleop.sh"
 fi
 
 # Select the first window
