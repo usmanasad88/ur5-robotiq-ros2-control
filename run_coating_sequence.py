@@ -38,6 +38,64 @@ import time
 from enum import Enum, auto
 
 import requests
+import os
+import math
+import struct
+import wave
+import tempfile
+import shutil
+import subprocess
+
+
+def play_beep(duration: float = 0.08, freq: float = 880.0, volume: float = 0.5) -> None:
+    """Play a short beep. Try several playback methods and fall back to terminal bell.
+
+    This function synthesizes a tiny WAV file and attempts to play it with
+    available system players (`play`, `aplay`, `paplay`). If none are
+    available it emits the terminal bell `\a`.
+    """
+    try:
+        framerate = 44100
+        nframes = int(framerate * max(0.01, duration))
+        amplitude = int(32767 * max(0.0, min(1.0, volume)))
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        try:
+            with wave.open(tmp, 'w') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(framerate)
+                frames = bytearray()
+                for i in range(nframes):
+                    sample = int(amplitude * math.sin(2 * math.pi * freq * (i / framerate)))
+                    frames += struct.pack('<h', sample)
+                wf.writeframes(frames)
+        finally:
+            tmp.close()
+
+        player = shutil.which('play') or shutil.which('aplay') or shutil.which('paplay')
+        if player:
+            # fire-and-forget playback so we don't block
+            subprocess.Popen([player, tmp.name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # schedule file removal
+            def _remove(path: str) -> None:
+                time.sleep(2.0)
+                try:
+                    os.unlink(path)
+                except Exception:
+                    pass
+            threading.Thread(target=_remove, args=(tmp.name,), daemon=True).start()
+            return
+    except Exception:
+        pass
+
+    # Fallback: terminal bell
+    try:
+        sys.stdout.write('\a')
+        sys.stdout.flush()
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Program sequence
@@ -46,10 +104,11 @@ import requests
 SEQUENCE = [
     "move_hardener_from_storage_to_workplace.prog",
     "move_resin_from_storage_to_workplace.prog",
-    "move_roller_from_storage_to_workplace.prog",
-    "move_hardener_from_workplace_to_storage.prog",
+    #"move_roller_from_storage_to_workplace.prog",
+    # "move_hardener_from_workplace_to_storage.prog",
+    "use_roller_to_consolidate.prog",
     "move_resin_from_workplace_to_storage.prog",
-    "move_roller_from_workplace_to_storage.prog",
+    # "move_roller_from_workplace_to_storage.prog",
 ]
 
 # ---------------------------------------------------------------------------
@@ -105,6 +164,12 @@ class SequenceRunner:
     # ------------------------------------------------------------------ API helpers
 
     def _post(self, path: str, body: dict | None = None, timeout: float = 10.0):
+        # Play an audible beep to signal a new outgoing command
+        try:
+            play_beep()
+        except Exception:
+            pass
+
         try:
             r = requests.post(f"{self.api_base}{path}", json=body or {}, timeout=timeout)
             return r.json()

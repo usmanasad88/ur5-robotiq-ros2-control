@@ -38,6 +38,7 @@ wait(0.3)
 closegripper
 wait(1.0)
 movetonamed(Above_Bottle_Resin_Storage)
+movetonamed(Home)
 wait(0.5)
 
 # -----------------------------------------

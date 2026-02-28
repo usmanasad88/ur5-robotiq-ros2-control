@@ -289,7 +289,7 @@ class RobotClient:
         cmd = (
             f"ros2 action send_goal -f /robotiq_2f_urcap_adapter/gripper_command "
             f"robotiq_2f_urcap_adapter/GripperCommand "
-            f"'{{ command: {{ position: {robotiq_position}, max_effort: 70, max_speed: 0.05 }}}}'"
+            f"'{{ command: {{ position: {robotiq_position}, max_effort: 255, max_speed: 0.05 }}}}'"
         )
         
         try:

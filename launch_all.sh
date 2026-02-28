@@ -18,10 +18,11 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION="ur5"
 
-USE_FAKE="true"
+USE_FAKE="false"
 LAUNCH_UI=true
 LAUNCH_QUEST=false
 LAUNCH_QUEST_SERVO=false
+LAUNCH_SPACEMOUSE=false
 
 for arg in "$@"; do
     case $arg in
@@ -29,12 +30,14 @@ for arg in "$@"; do
         --no-ui)           LAUNCH_UI=false ;;
         --quest|-q)        LAUNCH_QUEST=true ;;
         --quest-servo|-qs) LAUNCH_QUEST_SERVO=true ;;
+        --spacemouse|-sm)  LAUNCH_SPACEMOUSE=true ;;
         --help|-h)
-            echo "Usage: $0 [--real] [--no-ui] [--quest] [--quest-servo]"
-            echo "  --real, -r        Use real robot hardware + gripper adapter"
-            echo "  --no-ui           Skip launching the Streamlit UI"
-            echo "  --quest, -q       Quest sim teleop via cuRobo (PoseDelta, jerky)"
-            echo "  --quest-servo,-qs Quest sim teleop via Jacobian IK velocity (smooth)"
+            echo "Usage: $0 [--real] [--no-ui] [--quest] [--quest-servo] [--spacemouse]"
+            echo "  --real, -r          Use real robot hardware + gripper adapter"
+            echo "  --no-ui             Skip launching the Streamlit UI"
+            echo "  --quest, -q         Quest sim teleop via cuRobo (PoseDelta, jerky)"
+            echo "  --quest-servo, -qs  Quest sim teleop via Jacobian IK velocity (smooth)"
+            echo "  --spacemouse, -sm   SpaceMouse teleop via Jacobian IK velocity (smooth)"
             exit 0
             ;;
     esac
@@ -46,7 +49,7 @@ if ! command -v tmux &>/dev/null; then
     exit 1
 fi
 
-echo "Launching UR5 services  (fake=$USE_FAKE, ui=$LAUNCH_UI, quest=$LAUNCH_QUEST)"
+echo "Launching UR5 services  (fake=$USE_FAKE, ui=$LAUNCH_UI, quest=$LAUNCH_QUEST, spacemouse=$LAUNCH_SPACEMOUSE)"
 
 # Kill any stale session from a previous run
 tmux kill-session -t "$SESSION" 2>/dev/null
@@ -98,6 +101,14 @@ if [ "$LAUNCH_QUEST_SERVO" = true ] && [ "$USE_FAKE" = "true" ]; then
 elif [ "$LAUNCH_QUEST_SERVO" = true ] && [ "$USE_FAKE" = "false" ]; then
     echo "NOTE: --quest-servo targets the sim velocity controller (sim only)."
     echo "      For real robot teleop use: bash run_quest_rtde_teleop.sh"
+fi
+
+# Window: SpaceMouse teleop via Jacobian IK velocity control (--spacemouse)
+if [ "$LAUNCH_SPACEMOUSE" = true ] && [ "$USE_FAKE" = "true" ]; then
+    tmux new-window -t "$SESSION" -n "SpaceMouse" \
+        "echo '[SpaceMouse] Waiting 5s for UR5 driver...'; sleep 5; echo '[SpaceMouse] Starting SpaceMouse servo teleop...'; \"$SCRIPT_DIR/run_spacemouse_teleop.sh\" --swap; exec bash"
+elif [ "$LAUNCH_SPACEMOUSE" = true ] && [ "$USE_FAKE" = "false" ]; then
+    echo "NOTE: --spacemouse targets the sim velocity controller (sim only)."
 fi
 
 # Select the first window
