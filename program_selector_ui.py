@@ -755,8 +755,14 @@ def read_program_description(program_path: Path) -> str:
     return "No description available"
 
 
-class EpisodeRecorder:
-    """Records video and joint states for an episode."""
+class SessionRecorder:
+    """Records video, joint states, and program-execution timelines for a
+    multi-program session.  Used by the Streamlit UI to capture long-horizon
+    experiments where several programs are run in sequence.
+
+    Note: For single-program episode recording aimed at ML dataset creation,
+    see ``experiment_recorder.EpisodeRecorder``.
+    """
     
     def __init__(self, experiment_name: str, controller):
         self.experiment_name = experiment_name
@@ -1185,7 +1191,7 @@ def main():
                 type="primary"
             ):
                 # Start recording
-                recorder = EpisodeRecorder(st.session_state.experiment_name, st.session_state.controller)
+                recorder = SessionRecorder(st.session_state.experiment_name, st.session_state.controller)
                 success, message = recorder.start_recording()
                 
                 if success:

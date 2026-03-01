@@ -2,7 +2,8 @@
 """
 GoPro video recorder integration for episode recording.
 
-Simplified wrapper around GoPro streaming for recording episodes.
+Records from the GoPro Max 2 UDP preview stream to an MP4 file via ffmpeg.
+Handles stream activation/deactivation via the GoPro HTTP API automatically.
 """
 
 import subprocess
@@ -11,31 +12,89 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple
 
+import requests
+
+
+# GoPro HTTP API endpoints (port 8080)
+_EP_STATE = "/gopro/camera/state"
+_EP_WIRED_USB = "/gopro/camera/control/wired_usb?p=1"
+_EP_STREAM_START = "/gopro/camera/stream/start"
+_EP_STREAM_STOP = "/gopro/camera/stream/stop"
+
+
 class GoProRecorder:
-    """Simple GoPro recorder using UDP stream and ffmpeg."""
-    
-    def __init__(self, gopro_ip: str = "172.29.170.51"):
+    """GoPro recorder using UDP preview stream and ffmpeg.
+
+    Automatically activates the preview stream via the GoPro HTTP API
+    before recording, matching the protocol used by the AURA
+    ``GoProStreamSource``.
+    """
+
+    def __init__(self, gopro_ip: str = "172.29.170.51", udp_port: int = 8554):
         self.ffmpeg_process = None
         self.output_file = None
         self.is_recording = False
         self.gopro_ip = gopro_ip
-        
-        # GoPro UDP stream URL (assumes GoPro is already in webcam mode)
-        self.stream_url = f"udp://{gopro_ip}:8554?overrun_nonfatal=1&fifo_size=50000000"
+        self.udp_port = udp_port
+        self._stream_started_by_us = False
+
+        # UDP URL with ffmpeg-friendly buffer settings
+        self.stream_url = (
+            f"udp://{gopro_ip}:{udp_port}"
+            "?overrun_nonfatal=1&fifo_size=50000000"
+        )
+
+    # ------------------------------------------------------------------
+    # GoPro HTTP helpers
+    # ------------------------------------------------------------------
+
+    def _http_get(self, endpoint: str, timeout: int = 5, silent: bool = False) -> bool:
+        """Send GET to the GoPro HTTP API.  Returns True on HTTP 200."""
+        url = f"http://{self.gopro_ip}:8080{endpoint}"
+        try:
+            resp = requests.get(url, timeout=timeout)
+            ok = resp.status_code == 200
+            if not ok and not silent:
+                print(f"⚠ GoPro API: {url} returned HTTP {resp.status_code}")
+            return ok
+        except Exception as exc:
+            if not silent:
+                print(f"⚠ GoPro API: {url} failed: {exc}")
+            return False
+
+    def _ensure_stream_active(self) -> bool:
+        """Ping the camera, enable wired USB, and start the preview stream."""
+        # 1. Check camera is reachable
+        if not self._http_get(_EP_STATE, silent=True):
+            print("⚠ GoPro not responding — is it connected and powered on?")
+            return False
+
+        # 2. Enable wired USB control
+        self._http_get(_EP_WIRED_USB, silent=True)
+        time.sleep(0.3)
+
+        # 3. Start preview stream
+        if not self._http_get(_EP_STREAM_START):
+            print("⚠ Failed to start GoPro preview stream")
+            return False
+
+        self._stream_started_by_us = True
+        time.sleep(0.5)  # let the stream stabilise
+        return True
     
     def start_recording(self, output_path: Path) -> Tuple[bool, str]:
-        """
-        Start recording from GoPro UDP stream.
-        
-        Args:
-            output_path: Path object pointing to output MP4 file
-            
-        Returns:
-            (success, message)
+        """Start recording from the GoPro UDP preview stream.
+
+        Activates the stream via the HTTP API if needed, then launches
+        an ffmpeg subprocess to write the HEVC stream directly to MP4.
         """
         if self.is_recording:
             return False, "Already recording"
-        
+
+        # Activate GoPro preview stream
+        if not self._ensure_stream_active():
+            return False, "GoPro stream not available (camera unreachable or stream failed to start)"
+
         self.output_file = output_path
         
         # FFmpeg command to capture UDP stream
@@ -73,12 +132,7 @@ class GoProRecorder:
             return False, f"Failed to start recording: {e}"
     
     def stop_recording(self) -> Tuple[bool, str]:
-        """
-        Stop recording and finalize video file.
-        
-        Returns:
-            (success, message)
-        """
+        """Stop recording and finalize the MP4 file."""
         if not self.is_recording or not self.ffmpeg_process:
             return False, "Not currently recording"
         
@@ -91,6 +145,11 @@ class GoProRecorder:
             
             self.is_recording = False
             self.ffmpeg_process = None
+
+            # Stop the preview stream if we started it
+            if self._stream_started_by_us:
+                self._http_get(_EP_STREAM_STOP, silent=True)
+                self._stream_started_by_us = False
             
             # Check if file was created
             if self.output_file and self.output_file.exists():
@@ -108,29 +167,5 @@ class GoProRecorder:
             return False, f"Error stopping recording: {e}"
     
     def is_gopro_streaming(self) -> bool:
-        """
-        Check if GoPro is currently streaming on UDP port.
-        
-        Returns:
-            True if stream appears to be active
-        """
-        try:
-            # Try to connect to GoPro HTTP API to check if it's alive
-            import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex((self.gopro_ip, 8080))
-            sock.close()
-            if result == 0:
-                return True
-            
-            # Fallback: check if UDP port 8554 is in use
-            result = subprocess.run(
-                ['netstat', '-anu'],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
-            return ':8554' in result.stdout
-        except Exception:
-            return False
+        """Check if the GoPro is reachable via its HTTP API."""
+        return self._http_get(_EP_STATE, timeout=2, silent=True)

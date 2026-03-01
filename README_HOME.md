@@ -293,4 +293,49 @@ cd /home/mani/Repos/ur_ws
 # For more details, see:
 # - GOPRO_INTEGRATION.md: Complete documentation
 # - GOPRO_INTEGRATION_SUMMARY.md: Implementation summary
+
+---
+
+## Data Collection & SmolVLA Finetuning (LeRobot)
+
+Record UR5 program executions as LeRobot datasets, then finetune the SmolVLA vision-language-action model.
+
+### Quick pipeline
+
+```bash
+# 1. Record 5 episodes of a program (requires launch_all.sh running)
+./record_program_episode.sh --program programs/my_task.prog --episodes 5 \
+    --task "pick up the red block" --convert --repo-id local/ur5_pick
+
+# 2. Or convert existing recordings in bulk
+python3 convert_to_lerobot.py --recordings-dir recordings/ \
+    --repo-id local/ur5_programs --fps 10
+
+# 3. Finetune SmolVLA (LoRA by default)
+./run_smolvla_finetune.sh          # uses REPO_ID=local/ur5_programs
+# Or override:
+REPO_ID=local/ur5_pick STEPS=10000 ./run_smolvla_finetune.sh
+```
+
+### Scripts reference
+
+| Script | Purpose |
+| --- | --- |
+| `record_program_episode.sh` | Run a `.prog` + record cameras + joint states in one shot |
+| `convert_to_lerobot.py` | Convert raw HDF5/MP4 recordings → LeRobotDataset |
+| `run_smolvla_finetune.sh` | Finetune SmolVLA (LoRA) on your dataset |
+| `experiment_recorder.py` | Standalone `EpisodeRecorder` class (shared with Streamlit UI) |
+
+### Environment variables for `run_smolvla_finetune.sh`
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `REPO_ID` | `local/ur5_programs` | Dataset repo ID |
+| `STEPS` | `20000` | Training steps |
+| `BATCH` | `32` | Batch size |
+| `USE_PEFT` | `true` | Enable LoRA (recommended for <100 episodes) |
+| `PEFT_R` | `64` | LoRA rank |
+| `LR` | `1e-3` | Learning rate |
+| `WANDB` | `false` | Enable Weights & Biases logging |
+
 # - test_gopro_integration.py: Test script
