@@ -746,7 +746,7 @@ def get_available_programs():
 def read_program_description(program_path: Path) -> str:
     """Read the first comment line from a program file as description."""
     try:
-        with open(program_path, 'r') as f:
+        with open(program_path, 'r', encoding='utf-8') as f:
             first_line = f.readline().strip()
             if first_line.startswith('#'):
                 return first_line[1:].strip()

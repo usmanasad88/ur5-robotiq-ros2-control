@@ -20,6 +20,9 @@ from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from std_msgs.msg import Bool, String, Float64
 from std_srvs.srv import Trigger, SetBool
+from geometry_msgs.msg import PoseStamped, Wrench, Twist
+from ur_msgs.srv import SetForceMode
+from controller_manager_msgs.srv import SwitchController
 from ur5_teleop_msgs.msg import PoseDelta
 from rcl_interfaces.msg import ParameterDescriptor
 
@@ -766,6 +769,19 @@ class UR5ProgramExecutorNode(Node):
             self.set_teleop_mode_callback,
             callback_group=self.callback_group
         )
+
+        # Force mode service clients
+        self._force_mode_active = False
+        self._last_force_mode_instruction = None
+        self._switch_controller_client = self.create_client(
+            SwitchController, '/controller_manager/switch_controller'
+        )
+        self._start_force_mode_client = self.create_client(
+            SetForceMode, '/force_mode_controller/start_force_mode'
+        )
+        self._stop_force_mode_client = self.create_client(
+            Trigger, '/force_mode_controller/stop_force_mode'
+        )
     
     def joint_state_callback(self, msg: JointState):
         """Handle incoming joint states."""
@@ -1479,6 +1495,10 @@ class UR5ProgramExecutorNode(Node):
                 self.speed_factor = instruction.speed_factor
                 self.get_logger().info(f"Speed set to {self.speed_factor}")
                 return True
+            elif instruction.type == InstructionType.FORCE_MODE:
+                return self.execute_force_mode(instruction)
+            elif instruction.type == InstructionType.FORCE_MODE_STOP:
+                return self.execute_force_mode_stop()
             elif instruction.type in (InstructionType.IF, InstructionType.ELSE, InstructionType.ENDIF):
                 # Conditionals are handled by execution_step, not here
                 return True
@@ -1527,33 +1547,51 @@ class UR5ProgramExecutorNode(Node):
             return False
     
     def execute_move_to_joint(self, instruction: RobotInstruction) -> bool:
-        """Execute a move to joint position."""
+        """Execute a move to joint position.
+
+        If force mode is active, it is temporarily suspended for the trajectory
+        move and then re-activated afterwards.
+        """
         if instruction.joint_positions is None:
             return False
-        
+
+        # Suspend force mode if active
+        was_in_force_mode = self._force_mode_active
+        saved_force_instruction = self._last_force_mode_instruction if was_in_force_mode else None
+        if was_in_force_mode:
+            self.get_logger().info("Suspending force mode for joint move...")
+            self.execute_force_mode_stop()
+            time.sleep(0.3)
+
         # Create trajectory message directly to joint position
         traj_msg = JointTrajectory()
         traj_msg.joint_names = self.joint_names
-        
+
         point = JointTrajectoryPoint()
         point.positions = instruction.joint_positions
         point.velocities = [0.0] * 6
-        
+
         # Calculate duration based on max joint movement
         current_pos = self.current_joint_state.cpu().numpy()
         max_diff = np.max(np.abs(np.array(instruction.joint_positions) - current_pos))
         duration = max(max_diff / (0.5 * self.speed_factor), 1.0)  # At least 1 second
-        
+
         point.time_from_start.sec = int(duration)
         point.time_from_start.nanosec = int((duration - int(duration)) * 1e9)
-        
+
         traj_msg.points.append(point)
         self.traj_pub.publish(traj_msg)
-        
+
         # Wait for trajectory to complete, but allow interruption
         if self._stop_event.wait(timeout=duration + 0.5):
             self.get_logger().info("Joint motion interrupted by stop/pause")
             return False
+
+        # Resume force mode if it was active
+        if was_in_force_mode and saved_force_instruction:
+            self.get_logger().info("Re-entering force mode after joint move...")
+            self.execute_force_mode(saved_force_instruction)
+
         return True
     
     def execute_wait(self, instruction: RobotInstruction) -> bool:
@@ -1566,7 +1604,124 @@ class UR5ProgramExecutorNode(Node):
             self.get_logger().info("Wait interrupted by stop/pause")
             return False
         return True
-    
+
+    def _call_service_sync(self, client, request, timeout=10.0):
+        """Call a ROS 2 service synchronously and return the result.
+
+        Uses a polling loop instead of rclpy.spin_until_future_complete to
+        avoid deadlock when called from within a callback on an already-spinning node.
+        """
+        if not client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().error(f"Service {client.srv_name} not available")
+            return None
+        future = client.call_async(request)
+        deadline = time.time() + timeout
+        while not future.done() and time.time() < deadline:
+            time.sleep(0.05)
+        if future.done():
+            return future.result()
+        self.get_logger().error(f"Service call to {client.srv_name} timed out after {timeout}s")
+        return None
+
+    def execute_force_mode(self, instruction: RobotInstruction) -> bool:
+        """Activate force mode with specified compliance axes and wrench."""
+        axes = instruction.force_mode_axes
+        wrench = instruction.force_mode_wrench
+        speed_limit = instruction.force_mode_speed_limit or 0.05
+
+        # Step 1: Activate force_mode_controller (deactivate trajectory controller)
+        switch_req = SwitchController.Request()
+        switch_req.activate_controllers = ["force_mode_controller"]
+        switch_req.deactivate_controllers = ["scaled_joint_trajectory_controller"]
+        switch_req.strictness = SwitchController.Request.BEST_EFFORT
+        result = self._call_service_sync(self._switch_controller_client, switch_req)
+        if not result or not result.ok:
+            self.get_logger().error("Failed to activate force_mode_controller")
+            return False
+        self.get_logger().info("force_mode_controller activated")
+        time.sleep(0.5)
+
+        # Step 2: Start force mode
+        req = SetForceMode.Request()
+        req.task_frame = PoseStamped()
+        req.task_frame.header.frame_id = "base"
+        req.task_frame.pose.orientation.w = 1.0
+
+        req.selection_vector_x = axes[0]
+        req.selection_vector_y = axes[1]
+        req.selection_vector_z = axes[2]
+        req.selection_vector_rx = axes[3]
+        req.selection_vector_ry = axes[4]
+        req.selection_vector_rz = axes[5]
+
+        req.wrench = Wrench()
+        req.wrench.force.x = float(wrench[0])
+        req.wrench.force.y = float(wrench[1])
+        req.wrench.force.z = float(wrench[2])
+        req.wrench.torque.x = float(wrench[3])
+        req.wrench.torque.y = float(wrench[4])
+        req.wrench.torque.z = float(wrench[5])
+
+        req.type = SetForceMode.Request.NO_TRANSFORM
+        req.speed_limits = Twist()
+        req.speed_limits.linear.x = speed_limit
+        req.speed_limits.linear.y = speed_limit
+        req.speed_limits.linear.z = speed_limit
+        req.speed_limits.angular.x = speed_limit * 4  # rad/s
+        req.speed_limits.angular.y = speed_limit * 4
+        req.speed_limits.angular.z = speed_limit * 4
+
+        req.deviation_limits = [0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
+        req.damping_factor = 0.1
+        req.gain_scaling = 0.5
+
+        result = self._call_service_sync(self._start_force_mode_client, req)
+        if not result or not result.success:
+            self.get_logger().error("Failed to start force mode")
+            self._restore_trajectory_controller()
+            return False
+
+        self._force_mode_active = True
+        self._last_force_mode_instruction = instruction
+        compliant = [a for a, v in zip("xyzRxRyRz", axes) if v]
+        self.get_logger().info(
+            f"Force mode active: compliant={compliant}, "
+            f"wrench=[{wrench[0]},{wrench[1]},{wrench[2]},{wrench[3]},{wrench[4]},{wrench[5]}], "
+            f"speed_limit={speed_limit}m/s"
+        )
+        return True
+
+    def execute_force_mode_stop(self) -> bool:
+        """Stop force mode and restore the trajectory controller."""
+        if not self._force_mode_active:
+            self.get_logger().warn("force_mode_stop called but force mode is not active")
+            return True
+
+        result = self._call_service_sync(
+            self._stop_force_mode_client, Trigger.Request()
+        )
+        if result and result.success:
+            self.get_logger().info("Force mode stopped")
+        else:
+            self.get_logger().error("Failed to stop force mode cleanly")
+
+        self._force_mode_active = False
+        time.sleep(0.3)
+        return self._restore_trajectory_controller()
+
+    def _restore_trajectory_controller(self) -> bool:
+        """Re-activate scaled_joint_trajectory_controller."""
+        switch_req = SwitchController.Request()
+        switch_req.activate_controllers = ["scaled_joint_trajectory_controller"]
+        switch_req.deactivate_controllers = ["force_mode_controller"]
+        switch_req.strictness = SwitchController.Request.BEST_EFFORT
+        result = self._call_service_sync(self._switch_controller_client, switch_req)
+        if result and result.ok:
+            self.get_logger().info("Restored scaled_joint_trajectory_controller")
+            return True
+        self.get_logger().error("Failed to restore trajectory controller")
+        return False
+
     def execute_gripper(self, position: float) -> bool:
         """Execute gripper command.
         
@@ -1713,12 +1868,16 @@ class UR5ProgramExecutorNode(Node):
         return False
     
     def execute_move_relative_instruction(self, instruction: RobotInstruction) -> bool:
-        """Execute a relative Cartesian move from a program instruction."""
+        """Execute a relative Cartesian move from a program instruction.
+
+        If force mode is active, it is temporarily suspended for the trajectory
+        move and then re-activated with the same parameters afterwards.
+        """
         if instruction.relative_move is None:
             return False
-        
+
         direction, distance = instruction.relative_move
-        
+
         direction_map = {
             'left':    [0.0, +1.0, 0.0],
             'right':   [0.0, -1.0, 0.0],
@@ -1727,13 +1886,23 @@ class UR5ProgramExecutorNode(Node):
             'up':      [0.0, 0.0, +1.0],
             'down':    [0.0, 0.0, -1.0],
         }
-        
+
         if direction not in direction_map:
             self.get_logger().error(f"moverelative: unknown direction '{direction}'")
             return False
-        
+
         offset = [d * distance for d in direction_map[direction]]
-        
+
+        # If force mode is active, suspend it for the trajectory move
+        was_in_force_mode = self._force_mode_active
+        saved_force_instruction = None
+        if was_in_force_mode:
+            # Save the last force mode instruction so we can re-enter
+            saved_force_instruction = self._last_force_mode_instruction
+            self.get_logger().info("Suspending force mode for moverelative...")
+            self.execute_force_mode_stop()
+            time.sleep(0.3)
+
         try:
             # Get current EE pose via FK
             kin_state = self.motion_gen.kinematics.get_state(
@@ -1741,26 +1910,26 @@ class UR5ProgramExecutorNode(Node):
             )
             ee_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
             ee_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
-            
+
             target_pos = [ee_pos[i] + offset[i] for i in range(3)]
-            
+
             self.get_logger().info(
                 f"Relative move: {direction} {distance:.3f}m  "
                 f"from [{ee_pos[0]:.4f}, {ee_pos[1]:.4f}, {ee_pos[2]:.4f}] "
                 f"to [{target_pos[0]:.4f}, {target_pos[1]:.4f}, {target_pos[2]:.4f}]"
             )
-            
+
             target_pose = CuroboPose(
                 position=torch.tensor(target_pos, device=self.tensor_args.device, dtype=self.tensor_args.dtype),
                 quaternion=torch.tensor(ee_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
             )
             start_state = CuroboJointState.from_position(self.current_joint_state.view(1, -1))
-            
+
             result = self.motion_gen.plan_single(
                 start_state, target_pose,
                 MotionGenPlanConfig(enable_graph=False, timeout=5.0)
             )
-            
+
             if result.success.item():
                 traj = result.get_interpolated_plan()
                 self.publish_trajectory(traj)
@@ -1768,12 +1937,22 @@ class UR5ProgramExecutorNode(Node):
                 if self._stop_event.wait(timeout=traj_duration + 0.5):
                     self.get_logger().info("Relative move interrupted by stop/pause")
                     return False
-                return True
+                move_ok = True
             else:
                 self.get_logger().error(f"Relative move planning failed: {result.status}")
-                return False
+                move_ok = False
+
+            # Re-enter force mode if it was active before the move
+            if was_in_force_mode and saved_force_instruction and move_ok:
+                self.get_logger().info("Re-entering force mode after moverelative...")
+                self.execute_force_mode(saved_force_instruction)
+
+            return move_ok
         except Exception as e:
             self.get_logger().error(f"Error in moverelative: {e}")
+            # Try to restore force mode even on error
+            if was_in_force_mode and saved_force_instruction:
+                self.execute_force_mode(saved_force_instruction)
             return False
     
     def execute_run_program(self, instruction: RobotInstruction) -> bool:
@@ -2060,6 +2239,10 @@ class UR5ProgramExecutorNode(Node):
         Next) resumes from wherever the program left off.
         """
         self._stop_event.set()  # Interrupt any ongoing sleep/wait
+
+        # Clean up force mode if active
+        if self._force_mode_active:
+            self.execute_force_mode_stop()
 
         # Clean up teleop resources if in teleop mode
         if self.state == ExecutorState.TELEOP:

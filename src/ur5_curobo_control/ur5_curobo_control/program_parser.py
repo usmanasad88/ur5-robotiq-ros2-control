@@ -13,6 +13,8 @@ Parses program files with robot instructions like:
   - closegripper
   - gripper(position)  # 0.0 = open, 1.0 = closed
   - set_speed(factor)  # 0.0-1.0 velocity scaling
+  - force_mode([x,y,z,rx,ry,rz], [fx,fy,fz,tx,ty,tz], speed_limit)
+  - force_mode_stop()
   - # comments are ignored
 
   Conditional blocks:
@@ -46,6 +48,8 @@ class InstructionType(Enum):
     CLOSE_GRIPPER = auto()
     GRIPPER = auto()
     SET_SPEED = auto()
+    FORCE_MODE = auto()
+    FORCE_MODE_STOP = auto()
     COMMENT = auto()
     UNKNOWN = auto()
 
@@ -80,6 +84,10 @@ class RobotInstruction:
     condition_type: Optional[str] = None  # 'gripper_open', 'gripper_closed', 'near', 'not_near'
     condition_target: Optional[str] = None  # position name for near/not_near
     condition_tolerance: Optional[float] = None  # tolerance in radians for near/not_near
+    # Force mode parameters
+    force_mode_axes: Optional[List[bool]] = None  # [x,y,z,rx,ry,rz] True=compliant
+    force_mode_wrench: Optional[List[float]] = None  # [fx,fy,fz,tx,ty,tz] in N/Nm
+    force_mode_speed_limit: Optional[float] = None  # m/s for compliant axes
 
 
 class ProgramParser:
@@ -132,7 +140,20 @@ class ProgramParser:
         r'runprogram\s*\(\s*([\w./-]+)\s*\)',
         re.IGNORECASE
     )
-    
+
+    # Force mode patterns
+    # force_mode(axes, wrench)  or  force_mode(axes, wrench, speed_limit)
+    # axes: [0,0,1,0,0,0]  wrench: [0,0,-10,0,0,0]  speed_limit: 0.05
+    FORCE_MODE_PATTERN = re.compile(
+        r'force_mode\s*\(\s*'
+        r'\[([^\]]+)\]\s*,\s*'        # axes [0,0,1,0,0,0]
+        r'\[([^\]]+)\]\s*'            # wrench [0,0,-10,0,0,0]
+        r'(?:,\s*([0-9.]+)\s*)?'      # optional speed_limit
+        r'\)',
+        re.IGNORECASE
+    )
+    FORCE_MODE_STOP_PATTERN = re.compile(r'force_mode_stop\s*\(\s*\)', re.IGNORECASE)
+
     # Conditional patterns
     # if gripper_open / if gripper_closed
     IF_GRIPPER_PATTERN = re.compile(
@@ -156,9 +177,9 @@ class ProgramParser:
         self.instructions = []
         self.errors = []
         
-        with open(filepath, 'r') as f:
+        with open(filepath, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        
+
         for line_num, line in enumerate(lines, start=1):
             instruction = self._parse_line(line.strip(), line_num)
             if instruction and instruction.type != InstructionType.COMMENT:
@@ -343,6 +364,36 @@ class ProgramParser:
                 sub_program=filename
             )
         
+        # Check for force_mode_stop() - must check before force_mode()
+        if self.FORCE_MODE_STOP_PATTERN.search(line):
+            return RobotInstruction(
+                type=InstructionType.FORCE_MODE_STOP,
+                line_number=line_num,
+                raw_line=line
+            )
+
+        # Check for force_mode([axes], [wrench], speed_limit)
+        match = self.FORCE_MODE_PATTERN.search(line)
+        if match:
+            try:
+                axes = [int(float(x.strip())) != 0 for x in match.group(1).split(',')]
+                wrench = [float(x.strip()) for x in match.group(2).split(',')]
+                speed_limit = float(match.group(3)) if match.group(3) else 0.05
+                if len(axes) != 6 or len(wrench) != 6:
+                    self.errors.append(f"Line {line_num}: force_mode axes and wrench must have 6 values")
+                    return None
+                return RobotInstruction(
+                    type=InstructionType.FORCE_MODE,
+                    line_number=line_num,
+                    raw_line=line,
+                    force_mode_axes=axes,
+                    force_mode_wrench=wrench,
+                    force_mode_speed_limit=speed_limit
+                )
+            except ValueError as e:
+                self.errors.append(f"Line {line_num}: Failed to parse force_mode: {e}")
+                return None
+
         # Check for conditional: if gripper_open / if gripper_closed
         match = self.IF_GRIPPER_PATTERN.match(line)
         if match:

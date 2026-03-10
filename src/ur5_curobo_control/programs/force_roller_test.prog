@@ -1,0 +1,83 @@
+# ============================================
+# Force-Controlled Roller Consolidation Test
+# ============================================
+# Picks up the roller, moves to the workpiece area,
+# then uses force mode to press down with controlled
+# Z-force while sweeping back and forth.
+#
+# force_mode([x,y,z,rx,ry,rz], [fx,fy,fz,tx,ty,tz], speed_limit)
+#   axes: 1=compliant (force-controlled), 0=stiff (position-controlled)
+#   wrench: force (N) and torque (Nm) to apply on compliant axes
+#   speed_limit: max speed on compliant axes (m/s), default 0.05
+# ============================================
+
+set_speed(0.3)
+
+# -----------------------------------------
+# Phase 1: Pick up roller from storage
+# -----------------------------------------
+if not_near(Home)
+  movetonamed(Home)
+  wait(0.5)
+endif
+
+if gripper_closed
+  wait(0.1)
+else
+  opengripper
+  wait(0.5)
+endif
+
+movetonamed(Roller_Storage_Above)
+wait(0.5)
+movetonamed(Roller_Storage_Pick)
+wait(0.3)
+closegripper
+wait(1.0)
+movetonamed(Roller_Storage_Above)
+wait(0.5)
+
+# -----------------------------------------
+# Phase 2: Move to workpiece start
+# -----------------------------------------
+movetonamed(Home)
+wait(0.5)
+movetonamed(Roller_Workpiece_Start)
+wait(0.5)
+
+# -----------------------------------------
+# Phase 3: Force-controlled rolling
+# -----------------------------------------
+# Enable force mode: Z-axis compliant, 15N downward, 50mm/s limit
+# X/Y/rotations stay stiff (position-controlled)
+force_mode([0,0,1,0,0,0], [0,0,-45,0,0,0], 0.05)
+wait(2.0)
+
+# Sweep back and forth - force mode suspends/resumes around each move
+movetonamed(Roller_Workpiece_End)
+wait(0.5)
+movetonamed(Roller_Workpiece_Start)
+wait(0.5)
+movetonamed(Roller_Workpiece_End)
+wait(0.5)
+movetonamed(Roller_Workpiece_Start)
+wait(0.5)
+
+# Stop force mode
+force_mode_stop()
+wait(0.5)
+
+# -----------------------------------------
+# Phase 4: Return roller to storage
+# -----------------------------------------
+movetonamed(Home)
+wait(0.5)
+movetonamed(Roller_Storage_Above)
+wait(0.3)
+movetonamed(Roller_Storage_Pick)
+wait(0.3)
+opengripper
+wait(0.5)
+movetonamed(Roller_Storage_Above)
+wait(0.3)
+movetonamed(Home)
