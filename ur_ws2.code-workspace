@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../droid"
+		},
+		{
+			"path": "../../isaac-sim-standalone-5.0.0-linux-x86_64"
 		}
 	],
 	"settings": {}

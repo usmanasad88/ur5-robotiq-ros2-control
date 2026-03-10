@@ -7,6 +7,7 @@ import traceback
 import uuid
 from typing import Optional, Sequence
 from pathlib import Path
+from pxr import Gf, Usd
 
 from isaacsim.core.api.objects import DynamicCuboid
 from isaacsim.cortex.framework.cortex_utils import load_behavior_module
@@ -54,12 +55,6 @@ def LOGGER(msg):
         carb.log_info(f"[UR Robotiq] {msg}")
     except Exception:
         pass
-
-
-class CubeSpec:
-    def __init__(self, name, color):
-        self.name = name
-        self.color = np.array(color)
 
 
 class ContextStateMonitor(DfDiagnosticsMonitor):
@@ -190,30 +185,87 @@ class URRobotiqCortex(CortexBase):
                 )
             )
 
-        obs_specs = [
-            CubeSpec("RedCube",    [0.7, 0.0, 0.0]),
-            CubeSpec("BlueCube",   [0.0, 0.0, 0.7]),
-            CubeSpec("YellowCube", [0.7, 0.7, 0.0]),
-            CubeSpec("GreenCube",  [0.0, 0.7, 0.0]),
-        ]
-        width = 0.05
-        for x, spec in zip(np.linspace(0.3, 0.6, len(obs_specs)), obs_specs):
-            try:
-                obj = world.scene.add(
-                    DynamicCuboid(
-                        prim_path=f"/World/Obs/{spec.name}",
-                        name=spec.name,
-                        size=width,
-                        color=spec.color,
-                        position=np.array([x, 0.3, width / 2]),
-                    )
-                )
-                self.robot.register_obstacle(obj)
-            except Exception as e:
-                LOGGER(f"Error adding obstacle {spec.name}: {e}")
+        ur_ws = _get_ur_ws_root()
+        stage = omni.usd.get_context().get_stage()
 
+        def set_prim_transform(prim_path, position, scale, orientation):
+            """Set position, scale, and orientation (quaternion) for a prim."""
+            try:
+                prim = stage.GetPrimAtPath(prim_path)
+                if not prim.IsValid():
+                    LOGGER(f"Prim not found: {prim_path}")
+                    return False
+
+                # Set translate
+                trans_attr = prim.GetAttribute("xformOp:translate")
+                trans_attr.Set(Gf.Vec3d(*position))
+
+                # Set scale
+                scale_attr = prim.GetAttribute("xformOp:scale")
+                scale_attr.Set(Gf.Vec3f(*scale))
+
+                # Set orient (quaternion: w, x, y, z) - check type and use appropriate quaternion
+                orient_attr = prim.GetAttribute("xformOp:orient")
+                if orient_attr.IsValid():
+                    type_name = str(orient_attr.GetTypeName())
+                    if "double" in type_name.lower() or "quatd" in type_name.lower():
+                        orient_attr.Set(Gf.Quatd(*orientation))
+                    else:
+                        orient_attr.Set(Gf.Quatf(*orientation))
+                else:
+                    orient_attr.Set(Gf.Quatf(*orientation))
+                return True
+            except Exception as e:
+                LOGGER(f"Error setting transform for {prim_path}: {e}")
+                return False
+
+        # Load robot_base (underneath the robot)
+        try:
+            robot_base_path = str(ur_ws / "isaac_standalone/Objects/robot_base.glb")
+            add_reference_to_stage(usd_path=robot_base_path, prim_path="/World/robot_base")
+            set_prim_transform("/World/robot_base",
+                             [-0.009593696794215147, 0.0024695288591715468, -0.2760287761940248],
+                             [0.6, 0.6, 0.6],
+                             [0.91553444, 0, 0, 0.40223953])
+            LOGGER(f"Loaded robot_base from: {robot_base_path}")
+        except Exception as e:
+            LOGGER(f"Error adding robot_base: {e}")
+
+        # Object specifications from Scene.usda
+        objects = [
+            ("box.glb", "box", [0.9174, -0.29926, 0.05085], [0.3, 0.3, 0.3], [1, 0, 0, 0]),
+            ("bottle.glb", "bottle", [1.0116872461300208, -0.0987870064384707, 0.05321864561837606], [0.15, 0.15, 0.15], [1, 0, 0, 0]),
+            ("mold.glb", "mold", [1.108707993901868, 0.459950646722579, 9.547918011776345e-15], [0.2, 0.2, 0.2], [1, 0, 0, 0]),
+            ("chair.glb", "chair", [1.3128894384148293, 0.8545256234274397, -0.27231766681465197], [0.6, 0.6, 0.6], [0.9377559, 0, 0, -0.34729514]),
+            ("table.glb", "table", [0.7636514390089982, 0.6177071396631896, -0.30026916624570116], [1, 1, 1], [0.946387, 0, 0, -0.32303506]),
+            ("roller.glb", "roller", [0.8831616495788102, -0.25242231112362945, 0.1430787020742762], [0.3, 0.3, 0.3], [1, 0, 0, 0]),
+            ("scale.usd", "scale", [0.895776507284684, 0.6064892383348871, -0.010653778094958904], [0.2, 0.2, 0.2], [1, 0, 0, 0]),
+            ("table.glb", "table_01", [0.9413563779556879, -0.43025008797395053, -0.300269166245701], [1, 1, 1], [0.47614548, 0, 0, -0.8793665]),
+            ("bottle.glb", "bottle_01", [1.0796799928205851, -0.0066494148867218975, 0.052028584976885166], [0.15, 0.15, 0.15], [1, 0, 0, 0]),
+            ("chair.glb", "chair_01", [0.9727215171318123, 1.1478893615620027, -0.27231766681466024], [0.6, 0.6, 0.6], [0.9377559, 0, 0, -0.34729514]),
+            ("chair.glb", "chair_02", [1.4550232149586235, -0.4619864365429003, -0.27231766681467223], [0.6, 0.6, 0.6], [0.4962087, 0, 0, -0.8682033]),
+            ("chair.glb", "chair_03", [1.2261491913826454, -0.8485005745177336, -0.2723176668146639], [0.6, 0.6, 0.6], [0.4962087, 0, 0, -0.8682033]),
+        ]
+
+        for obj_file, obj_name, position, scale, orientation in objects:
+            try:
+                obj_path = str(ur_ws / f"isaac_standalone/Objects/{obj_file}")
+                if os.path.exists(obj_path):
+                    prim_path = f"/World/Objects/{obj_name}"
+                    add_reference_to_stage(usd_path=obj_path, prim_path=prim_path)
+                    set_prim_transform(prim_path, position, scale, orientation)
+                    LOGGER(f"Loaded {obj_name}")
+                else:
+                    LOGGER(f"Object file not found: {obj_path}")
+            except Exception as e:
+                LOGGER(f"Error adding {obj_name}: {e}")
+
+        # Add ground plane underneath with correct position
         try:
             world.scene.add_default_ground_plane()
+            # Position the ground plane at the correct z-offset from Scene.usda
+            set_prim_transform("/World/defaultGroundPlane", [0, 0, -0.5762087103635386], [1, 1, 1], [1, 0, 0, 0])
+            LOGGER("Added ground plane")
         except Exception as e:
             LOGGER(f"Error adding ground plane: {e}")
 
