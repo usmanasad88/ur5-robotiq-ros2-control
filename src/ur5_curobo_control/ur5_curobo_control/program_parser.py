@@ -15,6 +15,8 @@ Parses program files with robot instructions like:
   - set_speed(factor)  # 0.0-1.0 velocity scaling
   - force_mode([x,y,z,rx,ry,rz], [fx,fy,fz,tx,ty,tz], speed_limit)
   - force_mode_stop()
+  - movel(direction, distance, speed, accel)  # URScript linear move (works during force mode)
+  - movel([x,y,z], distance, speed, accel)   # movel with arbitrary direction vector
   - # comments are ignored
 
   Conditional blocks:
@@ -50,6 +52,7 @@ class InstructionType(Enum):
     SET_SPEED = auto()
     FORCE_MODE = auto()
     FORCE_MODE_STOP = auto()
+    MOVEL = auto()
     COMMENT = auto()
     UNKNOWN = auto()
 
@@ -88,6 +91,11 @@ class RobotInstruction:
     force_mode_axes: Optional[List[bool]] = None  # [x,y,z,rx,ry,rz] True=compliant
     force_mode_wrench: Optional[List[float]] = None  # [fx,fy,fz,tx,ty,tz] in N/Nm
     force_mode_speed_limit: Optional[float] = None  # m/s for compliant axes
+    # movel parameters
+    movel_direction: Optional[List[float]] = None  # [x,y,z] direction vector (normalized)
+    movel_distance: Optional[float] = None  # meters
+    movel_speed: Optional[float] = None  # m/s linear speed
+    movel_accel: Optional[float] = None  # m/s^2 acceleration
 
 
 class ProgramParser:
@@ -153,6 +161,24 @@ class ProgramParser:
         re.IGNORECASE
     )
     FORCE_MODE_STOP_PATTERN = re.compile(r'force_mode_stop\s*\(\s*\)', re.IGNORECASE)
+
+    # movel with named direction: movel(forward, 0.15, 0.05)
+    # movel with vector: movel([0,1,-1], 0.15, 0.05)
+    # Uses URScript movel via urscript_interface - works during force mode
+    MOVEL_NAMED_PATTERN = re.compile(
+        r'movel\s*\(\s*(\w+)\s*,\s*([0-9.]+)'
+        r'(?:\s*,\s*([0-9.]+))?'           # optional speed
+        r'(?:\s*,\s*([0-9.]+))?'           # optional accel
+        r'\s*\)',
+        re.IGNORECASE
+    )
+    MOVEL_VECTOR_PATTERN = re.compile(
+        r'movel\s*\(\s*\[([^\]]+)\]\s*,\s*([0-9.]+)'
+        r'(?:\s*,\s*([0-9.]+))?'           # optional speed
+        r'(?:\s*,\s*([0-9.]+))?'           # optional accel
+        r'\s*\)',
+        re.IGNORECASE
+    )
 
     # Conditional patterns
     # if gripper_open / if gripper_closed
@@ -353,6 +379,65 @@ class ProgramParser:
                 relative_move=(direction, distance)
             )
         
+        # Check for movel([x,y,z], distance, speed, accel) - vector form
+        match = self.MOVEL_VECTOR_PATTERN.search(line)
+        if match:
+            try:
+                vec = [float(x.strip()) for x in match.group(1).split(',')]
+                if len(vec) != 3:
+                    self.errors.append(f"Line {line_num}: movel vector must have 3 values [x,y,z]")
+                    return None
+                distance = float(match.group(2))
+                speed = float(match.group(3)) if match.group(3) else None
+                accel = float(match.group(4)) if match.group(4) else None
+                # Normalize the direction vector
+                import math
+                mag = math.sqrt(sum(v*v for v in vec))
+                if mag < 1e-10:
+                    self.errors.append(f"Line {line_num}: movel direction vector cannot be zero")
+                    return None
+                direction = [v / mag for v in vec]
+                return RobotInstruction(
+                    type=InstructionType.MOVEL,
+                    line_number=line_num,
+                    raw_line=line,
+                    movel_direction=direction,
+                    movel_distance=distance,
+                    movel_speed=speed,
+                    movel_accel=accel
+                )
+            except ValueError as e:
+                self.errors.append(f"Line {line_num}: Failed to parse movel: {e}")
+                return None
+
+        # Check for movel(direction_name, distance, speed, accel) - named form
+        match = self.MOVEL_NAMED_PATTERN.search(line)
+        if match:
+            direction_name = match.group(1).lower()
+            distance = float(match.group(2))
+            speed = float(match.group(3)) if match.group(3) else None
+            accel = float(match.group(4)) if match.group(4) else None
+            direction_map = {
+                'left':    [0.0, +1.0, 0.0],
+                'right':   [0.0, -1.0, 0.0],
+                'forward': [+1.0, 0.0, 0.0],
+                'back':    [-1.0, 0.0, 0.0],
+                'up':      [0.0, 0.0, +1.0],
+                'down':    [0.0, 0.0, -1.0],
+            }
+            if direction_name not in direction_map:
+                self.errors.append(f"Line {line_num}: Invalid movel direction '{direction_name}'. Use: {', '.join(direction_map.keys())} or [x,y,z] vector")
+                return None
+            return RobotInstruction(
+                type=InstructionType.MOVEL,
+                line_number=line_num,
+                raw_line=line,
+                movel_direction=direction_map[direction_name],
+                movel_distance=distance,
+                movel_speed=speed,
+                movel_accel=accel
+            )
+
         # Check for runprogram(filename)
         match = self.RUN_PROGRAM_PATTERN.search(line)
         if match:

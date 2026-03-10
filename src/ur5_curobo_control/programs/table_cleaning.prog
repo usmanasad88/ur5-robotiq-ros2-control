@@ -1,0 +1,58 @@
+# ============================================
+# Table Cleaning with Cloth
+# ============================================
+# Moves to the table center, enables force mode
+# with Z-axis compliance to press down on the
+# surface, then sweeps forward and back to
+# emulate wiping the table with a cloth.
+#
+# force_mode([x,y,z,rx,ry,rz], [fx,fy,fz,tx,ty,tz], speed_limit)
+#   axes: 1=compliant (force-controlled), 0=stiff (position-controlled)
+#   wrench: force (N) and torque (Nm) to apply on compliant axes
+#   speed_limit: max speed on compliant axes (m/s)
+# ============================================
+
+set_speed(0.3)
+
+# -----------------------------------------
+# Phase 1: Go home and close gripper (hold cloth)
+# -----------------------------------------
+# if not_near(Home)
+#   movetonamed(Home)
+#   wait(0.5)
+# endif
+#
+# closegripper
+# wait(1.0)
+#
+# # -----------------------------------------
+# # Phase 2: Move to table surface center
+# # -----------------------------------------
+# movetonamed(table_surface_center)
+# wait(0.5)
+
+# -----------------------------------------
+# Phase 3: Force-controlled wiping
+# -----------------------------------------
+# Enable force mode: Z-axis compliant, 10N downward, 50mm/s limit
+# X/Y/rotations stay stiff (position-controlled)
+force_mode([0,0,1,0,0,0], [0,0,10,0,0,0], 0.05)
+wait(1.0)
+movetonamed(table_surface_center)
+wait(0.5)
+
+# Sweep using movel with direction vectors (works during force mode)
+# movel([x,y,z], distance_m, speed_m/s)
+movel(forward, 0.15, 0.05)
+movel(back, 0.15, 0.05)
+movel(forward, 0.15, 0.05)
+movel(back, 0.15, 0.05)
+
+# Stop force mode
+force_mode_stop()
+wait(0.5)
+
+# -----------------------------------------
+# Phase 4: Return home
+# -----------------------------------------
+movetonamed(Home)

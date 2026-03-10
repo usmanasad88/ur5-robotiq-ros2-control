@@ -16,6 +16,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from std_msgs.msg import Bool, String, Float64
@@ -270,7 +271,7 @@ class UR5ProgramExecutorNode(Node):
         """Load teleop jog settings from teleop_config.yaml."""
         path = os.path.realpath(self._teleop_config_path)
         try:
-            with open(path, 'r') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 cfg = yaml.safe_load(f) or {}
             self.teleop_jog_linear     = float(cfg.get('teleop_jog_linear',     self.teleop_jog_linear))
             self.teleop_jog_angular    = float(cfg.get('teleop_jog_angular',    self.teleop_jog_angular))
@@ -774,13 +775,21 @@ class UR5ProgramExecutorNode(Node):
         self._force_mode_active = False
         self._last_force_mode_instruction = None
         self._switch_controller_client = self.create_client(
-            SwitchController, '/controller_manager/switch_controller'
+            SwitchController, '/controller_manager/switch_controller',
+            callback_group=self.callback_group
         )
         self._start_force_mode_client = self.create_client(
-            SetForceMode, '/force_mode_controller/start_force_mode'
+            SetForceMode, '/force_mode_controller/start_force_mode',
+            callback_group=self.callback_group
         )
         self._stop_force_mode_client = self.create_client(
-            Trigger, '/force_mode_controller/stop_force_mode'
+            Trigger, '/force_mode_controller/stop_force_mode',
+            callback_group=self.callback_group
+        )
+
+        # URScript command publisher (for movel during force mode)
+        self._urscript_pub = self.create_publisher(
+            String, '/urscript_interface/script_command', 1
         )
     
     def joint_state_callback(self, msg: JointState):
@@ -1499,6 +1508,8 @@ class UR5ProgramExecutorNode(Node):
                 return self.execute_force_mode(instruction)
             elif instruction.type == InstructionType.FORCE_MODE_STOP:
                 return self.execute_force_mode_stop()
+            elif instruction.type == InstructionType.MOVEL:
+                return self.execute_movel(instruction)
             elif instruction.type in (InstructionType.IF, InstructionType.ELSE, InstructionType.ENDIF):
                 # Conditionals are handled by execution_step, not here
                 return True
@@ -1624,90 +1635,63 @@ class UR5ProgramExecutorNode(Node):
         return None
 
     def execute_force_mode(self, instruction: RobotInstruction) -> bool:
-        """Activate force mode with specified compliance axes and wrench."""
+        """Activate force mode via URScript force_mode() command.
+
+        Uses URScript directly (not the ROS2 force_mode_controller) so that
+        subsequent movel commands run in the same URScript context and work
+        correctly alongside force mode - just like on the teach pendant.
+        """
         axes = instruction.force_mode_axes
         wrench = instruction.force_mode_wrench
         speed_limit = instruction.force_mode_speed_limit or 0.05
 
-        # Step 1: Activate force_mode_controller (deactivate trajectory controller)
-        switch_req = SwitchController.Request()
-        switch_req.activate_controllers = ["force_mode_controller"]
-        switch_req.deactivate_controllers = ["scaled_joint_trajectory_controller"]
-        switch_req.strictness = SwitchController.Request.BEST_EFFORT
-        result = self._call_service_sync(self._switch_controller_client, switch_req)
-        if not result or not result.ok:
-            self.get_logger().error("Failed to activate force_mode_controller")
-            return False
-        self.get_logger().info("force_mode_controller activated")
-        time.sleep(0.5)
+        # Format axes as integers for URScript: [0,0,1,0,0,0]
+        axes_str = f"[{int(axes[0])},{int(axes[1])},{int(axes[2])},{int(axes[3])},{int(axes[4])},{int(axes[5])}]"
+        wrench_str = f"[{wrench[0]},{wrench[1]},{wrench[2]},{wrench[3]},{wrench[4]},{wrench[5]}]"
+        limits_str = f"[{speed_limit},{speed_limit},{speed_limit},{speed_limit*4},{speed_limit*4},{speed_limit*4}]"
 
-        # Step 2: Start force mode
-        req = SetForceMode.Request()
-        req.task_frame = PoseStamped()
-        req.task_frame.header.frame_id = "base"
-        req.task_frame.pose.orientation.w = 1.0
+        # URScript force_mode(task_frame, selection_vector, wrench, type, limits)
+        # type 2 = frame is the base frame with no transform
+        urscript = (
+            f"def start_fm():\n"
+            f"  force_mode(p[0,0,0,0,0,0], {axes_str}, {wrench_str}, 2, {limits_str})\n"
+            f"end\n"
+        )
 
-        req.selection_vector_x = axes[0]
-        req.selection_vector_y = axes[1]
-        req.selection_vector_z = axes[2]
-        req.selection_vector_rx = axes[3]
-        req.selection_vector_ry = axes[4]
-        req.selection_vector_rz = axes[5]
-
-        req.wrench = Wrench()
-        req.wrench.force.x = float(wrench[0])
-        req.wrench.force.y = float(wrench[1])
-        req.wrench.force.z = float(wrench[2])
-        req.wrench.torque.x = float(wrench[3])
-        req.wrench.torque.y = float(wrench[4])
-        req.wrench.torque.z = float(wrench[5])
-
-        req.type = SetForceMode.Request.NO_TRANSFORM
-        req.speed_limits = Twist()
-        req.speed_limits.linear.x = speed_limit
-        req.speed_limits.linear.y = speed_limit
-        req.speed_limits.linear.z = speed_limit
-        req.speed_limits.angular.x = speed_limit * 4  # rad/s
-        req.speed_limits.angular.y = speed_limit * 4
-        req.speed_limits.angular.z = speed_limit * 4
-
-        req.deviation_limits = [0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
-        req.damping_factor = 0.1
-        req.gain_scaling = 0.5
-
-        result = self._call_service_sync(self._start_force_mode_client, req)
-        if not result or not result.success:
-            self.get_logger().error("Failed to start force mode")
-            self._restore_trajectory_controller()
-            return False
+        msg = String()
+        msg.data = urscript
+        self._urscript_pub.publish(msg)
 
         self._force_mode_active = True
         self._last_force_mode_instruction = instruction
         compliant = [a for a, v in zip("xyzRxRyRz", axes) if v]
         self.get_logger().info(
-            f"Force mode active: compliant={compliant}, "
-            f"wrench=[{wrench[0]},{wrench[1]},{wrench[2]},{wrench[3]},{wrench[4]},{wrench[5]}], "
-            f"speed_limit={speed_limit}m/s"
+            f"Force mode active (URScript): compliant={compliant}, "
+            f"wrench={wrench_str}, speed_limit={speed_limit}m/s"
         )
+        time.sleep(0.5)
         return True
 
     def execute_force_mode_stop(self) -> bool:
-        """Stop force mode and restore the trajectory controller."""
+        """Stop force mode via URScript end_force_mode() command."""
         if not self._force_mode_active:
             self.get_logger().warn("force_mode_stop called but force mode is not active")
             return True
 
-        result = self._call_service_sync(
-            self._stop_force_mode_client, Trigger.Request()
+        urscript = (
+            "def stop_fm():\n"
+            "  end_force_mode()\n"
+            "end\n"
         )
-        if result and result.success:
-            self.get_logger().info("Force mode stopped")
-        else:
-            self.get_logger().error("Failed to stop force mode cleanly")
+
+        msg = String()
+        msg.data = urscript
+        self._urscript_pub.publish(msg)
 
         self._force_mode_active = False
+        self.get_logger().info("Force mode stopped (URScript)")
         time.sleep(0.3)
-        return self._restore_trajectory_controller()
+        return True
 
     def _restore_trajectory_controller(self) -> bool:
         """Re-activate scaled_joint_trajectory_controller."""
@@ -1721,6 +1705,58 @@ class UR5ProgramExecutorNode(Node):
             return True
         self.get_logger().error("Failed to restore trajectory controller")
         return False
+
+    def execute_movel(self, instruction: RobotInstruction) -> bool:
+        """Execute a relative linear move via URScript movel command.
+
+        Computes the target on the UR controller side using get_actual_tcp_pose()
+        so the offset is always relative to the real TCP position. Works during
+        force mode - compliant axes stay force-controlled, stiff axes follow
+        the linear trajectory.
+        """
+        direction = instruction.movel_direction
+        distance = instruction.movel_distance
+        if direction is None or distance is None:
+            self.get_logger().error("movel: missing direction or distance")
+            return False
+
+        speed = instruction.movel_speed or (self.speed_factor * 0.25)
+        accel = instruction.movel_accel or 0.5
+
+        offset = [d * distance for d in direction]
+
+        # Send a URScript program that reads the actual TCP pose on the robot
+        # and adds the offset in base frame coordinates. This avoids FK
+        # mismatches and stale joint state issues.
+        urscript = (
+            f"def movel_rel():\n"
+            f"  local tcp = get_actual_tcp_pose()\n"
+            f"  local tgt = p[tcp[0]+({offset[0]:.6f}), tcp[1]+({offset[1]:.6f}), "
+            f"tcp[2]+({offset[2]:.6f}), tcp[3], tcp[4], tcp[5]]\n"
+            f"  movel(tgt, a={accel:.4f}, v={speed:.4f})\n"
+            f"end\n"
+        )
+
+        dir_str = f"[{direction[0]:.2f},{direction[1]:.2f},{direction[2]:.2f}]"
+        self.get_logger().info(
+            f"movel: dir={dir_str} {distance:.3f}m at {speed:.4f}m/s, accel={accel:.2f}m/s^2"
+        )
+
+        msg = String()
+        msg.data = urscript
+        self._urscript_pub.publish(msg)
+
+        # Wait for the move to complete (estimate from distance and speed)
+        move_duration = distance / speed + 0.5  # extra time for accel/decel
+        self.get_logger().info(f"movel: waiting {move_duration:.1f}s for completion")
+        if self._stop_event.wait(timeout=move_duration):
+            self.get_logger().info("movel interrupted by stop/pause")
+            stop_msg = String()
+            stop_msg.data = "stopj(2.0)"
+            self._urscript_pub.publish(stop_msg)
+            return False
+
+        return True
 
     def execute_gripper(self, position: float) -> bool:
         """Execute gripper command.
@@ -2274,8 +2310,10 @@ def main(args=None):
     rclpy.init(args=args)
     node = UR5ProgramExecutorNode()
     
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
