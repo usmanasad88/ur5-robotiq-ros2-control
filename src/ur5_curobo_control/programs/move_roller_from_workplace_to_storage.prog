@@ -48,6 +48,7 @@ wait(1.0)
 # -----------------------------------------
 # Lift the roller straight up
 movetonamed(Roller_Workplace_Above)
+wait(0.5)
 movetonamed(Home)
 wait(0.5)
 

@@ -1,9 +1,11 @@
 #!/bin/bash
-# Test force-controlled push in -Z direction
+# Test force-controlled push: down (-Z) + forward via movel
+# Uses URScript directly (no controller switching needed)
+#
 # Usage:
-#   ./run_force_push_test.sh                # 10N down, 5s
-#   ./run_force_push_test.sh --force 15     # 15N down
-#   ./run_force_push_test.sh --time 10      # hold 10s
+#   ./run_force_push_test.sh                                    # defaults: 60N, 100mm, 50mm/s
+#   ./run_force_push_test.sh --force 40 --distance 0.15         # 40N, 150mm
+#   ./run_force_push_test.sh --speed 0.03 --speed-limit 0.1    # slower
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source /opt/ros/humble/setup.bash

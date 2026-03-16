@@ -42,8 +42,12 @@ source /opt/ros/humble/setup.bash
 source install/setup.bash
 
 # Launch with provided arguments or defaults
-ROBOT_IP="${1:-172.17.66.105}"
+#ROBOT_IP="${1:-172.17.66.105}"
 USE_FAKE="${2:-true}"
+ROBOT_IP="${1:-192.168.0.5}"
+
+
+# Local IP: 172.17.66.133
 
 echo "Launching UR5 + Robotiq 2F-85..."
 echo "Robot IP: $ROBOT_IP"

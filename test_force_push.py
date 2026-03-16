@@ -1,180 +1,137 @@
 #!/usr/bin/env python3
 """
-Test force-controlled push in -Z (base frame).
+Test force-controlled push: down (-Z) + forward via movel.
 
-Activates the force_mode_controller with Z-axis compliance,
-applies a gentle downward force, waits, then stops.
+Replicates the UR teach pendant pattern:
+  Force node: Base frame, Z compliant, -60N, 150mm/s limit
+  MoveL under Force: direction [0,-1,-1], distance 100mm
+
+Uses URScript directly (like program_executor) so force_mode and
+movel run in the same URScript context on the controller.
 
 Usage:
-    ./run_force_push_test.sh              # default 10N down for 5s
-    ./run_force_push_test.sh --force 15   # 15N down
-    ./run_force_push_test.sh --time 10    # hold for 10s
+    python3 test_force_push.py                          # defaults
+    python3 test_force_push.py --force 60 --distance 0.1 --speed 0.05
 """
 
-import sys
+import math
 import time
 import argparse
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped, Wrench, Twist
-from ur_msgs.srv import SetForceMode
-from std_srvs.srv import Trigger
-from controller_manager_msgs.srv import SwitchController
+from std_msgs.msg import String
 
 
 class ForcePushTest(Node):
-    def __init__(self, force_n, duration_s):
+    def __init__(self, force_n, speed_limit, distance, move_speed):
         super().__init__("force_push_test")
         self.force_n = force_n
-        self.duration_s = duration_s
+        self.speed_limit = speed_limit
+        self.distance = distance
+        self.move_speed = move_speed
 
-        self.switch_client = self.create_client(
-            SwitchController, "/controller_manager/switch_controller"
-        )
-        self.start_force_client = self.create_client(
-            SetForceMode, "/force_mode_controller/start_force_mode"
-        )
-        self.stop_force_client = self.create_client(
-            Trigger, "/force_mode_controller/stop_force_mode"
+        # URScript interface - same as program_executor uses
+        self._urscript_pub = self.create_publisher(
+            String, "/urscript_interface/script_command", 1
         )
 
-    def wait_for_service(self, client, name, timeout=5.0):
-        if not client.wait_for_service(timeout_sec=timeout):
-            self.get_logger().error(f"Service {name} not available")
-            return False
-        return True
-
-    def call_sync(self, client, request):
-        future = client.call_async(request)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=10.0)
-        return future.result()
-
-    def activate_force_controller(self):
-        """Activate force_mode_controller (deactivates trajectory controller)."""
-        req = SwitchController.Request()
-        req.activate_controllers = ["force_mode_controller"]
-        req.deactivate_controllers = ["scaled_joint_trajectory_controller"]
-        req.strictness = SwitchController.Request.BEST_EFFORT
-        result = self.call_sync(self.switch_client, req)
-        if result and result.ok:
-            self.get_logger().info("force_mode_controller activated")
-            return True
-        self.get_logger().error(f"Failed to activate force_mode_controller: {result}")
-        return False
-
-    def deactivate_force_controller(self):
-        """Deactivate force_mode_controller, reactivate trajectory controller."""
-        req = SwitchController.Request()
-        req.activate_controllers = ["scaled_joint_trajectory_controller"]
-        req.deactivate_controllers = ["force_mode_controller"]
-        req.strictness = SwitchController.Request.BEST_EFFORT
-        result = self.call_sync(self.switch_client, req)
-        if result and result.ok:
-            self.get_logger().info("Restored scaled_joint_trajectory_controller")
-
-    def start_force_mode(self):
-        """Start force mode: compliant in Z, apply downward force."""
-        req = SetForceMode.Request()
-
-        # Task frame at base origin, identity orientation
-        req.task_frame = PoseStamped()
-        req.task_frame.header.frame_id = "base"
-        req.task_frame.pose.orientation.w = 1.0
-
-        # Only Z is compliant (force-controlled)
-        req.selection_vector_x = False
-        req.selection_vector_y = False
-        req.selection_vector_z = True
-        req.selection_vector_rx = False
-        req.selection_vector_ry = False
-        req.selection_vector_rz = False
-
-        # Apply force in -Z (downward in base frame)
-        req.wrench = Wrench()
-        req.wrench.force.z = -self.force_n
-
-        # Frame type 2 = no transform (use task frame as-is)
-        req.type = SetForceMode.Request.NO_TRANSFORM
-
-        # Speed limit for compliant axis
-        req.speed_limits = Twist()
-        req.speed_limits.linear.z = 0.05  # max 50mm/s in Z
-
-        # Deviation limits for non-compliant axes (hold position)
-        req.deviation_limits = [0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
-
-        # Conservative damping and gain
-        req.damping_factor = 0.1
-        req.gain_scaling = 0.5
-
-        result = self.call_sync(self.start_force_client, req)
-        if result and result.success:
-            self.get_logger().info(
-                f"Force mode active: {self.force_n}N downward, Z speed limit 50mm/s"
-            )
-            return True
-        self.get_logger().error(f"Failed to start force mode: {result}")
-        return False
-
-    def stop_force_mode(self):
-        result = self.call_sync(self.stop_force_client, Trigger.Request())
-        if result and result.success:
-            self.get_logger().info("Force mode stopped")
+    def send_urscript(self, script):
+        msg = String()
+        msg.data = script
+        self._urscript_pub.publish(msg)
+        self.get_logger().info(f"Sent URScript ({len(script)} bytes)")
 
     def run(self):
-        # Check services
-        for client, name in [
-            (self.switch_client, "switch_controller"),
-            (self.start_force_client, "start_force_mode"),
-            (self.stop_force_client, "stop_force_mode"),
-        ]:
-            if not self.wait_for_service(client, name):
-                return
+        # Wait for publisher to connect
+        time.sleep(1.0)
 
-        print(f"\n  Force push test: {self.force_n}N downward for {self.duration_s}s")
-        print(f"  Speed limit: 50mm/s in Z")
-        print(f"  Non-compliant axes: X, Y, Rx, Ry, Rz (position hold)")
+        # Direction vector [0, -1, -1] normalized
+        dx, dy, dz = 0.0, -1.0, -1.0
+        norm = math.sqrt(dx**2 + dy**2 + dz**2)
+        dx, dy, dz = dx / norm, dy / norm, dz / norm
+
+        # Compute offset from direction and distance
+        ox = dx * self.distance
+        oy = dy * self.distance
+        oz = dz * self.distance
+
+        # Estimate move duration
+        move_duration = self.distance / self.move_speed + 1.0
+
+        force = self.force_n
+        sl = self.speed_limit
+
+        print(f"\n  Force push test (URScript)")
+        print(f"  Force: -{force}N in Z (downward)")
+        print(f"  Speed limit on compliant axis: {sl*1000:.0f}mm/s")
+        print(f"  MoveL direction: [0, -1, -1] (normalized)")
+        print(f"  MoveL distance: {self.distance*1000:.0f}mm")
+        print(f"  MoveL speed: {self.move_speed*1000:.0f}mm/s")
+        print(f"  Estimated duration: {move_duration:.1f}s")
         print(f"\n  Press Ctrl+C at any time to stop.\n")
 
+        # URScript program that runs entirely on the UR controller:
+        # 1. Start force mode (Z compliant, -60N, 150mm/s limit)
+        # 2. Wait for force to engage
+        # 3. movel in direction [0,-1,-1] for the given distance
+        # 4. Hold briefly
+        # 5. End force mode
+        urscript = (
+            f"def force_push():\n"
+            f"  force_mode(p[0,0,0,0,0,0], [0,0,1,0,0,0], "
+            f"[0,0,{-force},0,0,0], 2, [{sl},{sl},{sl},{sl*4},{sl*4},{sl*4}])\n"
+            f"  sleep(1.0)\n"
+            f"  local tcp = get_actual_tcp_pose()\n"
+            f"  local tgt = p[tcp[0]+({ox:.6f}), tcp[1]+({oy:.6f}), "
+            f"tcp[2]+({oz:.6f}), tcp[3], tcp[4], tcp[5]]\n"
+            f"  movel(tgt, a=0.3, v={self.move_speed:.4f})\n"
+            f"  sleep(0.5)\n"
+            f"  end_force_mode()\n"
+            f"end\n"
+        )
+
         try:
-            # Step 1: Activate force controller
-            if not self.activate_force_controller():
-                return
+            self.get_logger().info("Starting force_push URScript program...")
+            self.send_urscript(urscript)
 
-            time.sleep(0.5)  # let controller settle
-
-            # Step 2: Start force mode
-            if not self.start_force_mode():
-                self.deactivate_force_controller()
-                return
-
-            # Step 3: Wait
-            print(f"  Holding for {self.duration_s}s...")
-            for i in range(int(self.duration_s * 10)):
+            # Wait for the program to complete on the UR controller
+            total_wait = 1.0 + move_duration + 0.5 + 1.0  # force settle + move + hold + buffer
+            print(f"  Running on UR controller (~{total_wait:.0f}s)...")
+            for i in range(int(total_wait * 10)):
                 time.sleep(0.1)
-                remaining = self.duration_s - (i + 1) * 0.1
-                if remaining > 0 and (i + 1) % 10 == 0:
-                    print(f"  {remaining:.0f}s remaining...")
+                elapsed = (i + 1) * 0.1
+                if (i + 1) % 10 == 0:
+                    print(f"  {elapsed:.0f}s / ~{total_wait:.0f}s ...")
+
+            print("  URScript program should be complete.")
 
         except KeyboardInterrupt:
-            print("\n  Interrupted!")
-        finally:
-            # Always clean up
-            print("  Stopping force mode...")
-            self.stop_force_mode()
-            time.sleep(0.3)
-            self.deactivate_force_controller()
-            print("  Done.")
+            print("\n  Interrupted! Sending end_force_mode...")
+            self.send_urscript(
+                "def stop_fm():\n"
+                "  end_force_mode()\n"
+                "  stopj(2.0)\n"
+                "end\n"
+            )
+            time.sleep(0.5)
+
+        print("  Done.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test force push in -Z")
-    parser.add_argument("--force", type=float, default=10.0, help="Force in N (default: 10)")
-    parser.add_argument("--time", type=float, default=5.0, help="Duration in seconds (default: 5)")
+    parser = argparse.ArgumentParser(description="Test force push down + forward")
+    parser.add_argument("--force", type=float, default=60.0,
+                        help="Downward force in N (default: 60)")
+    parser.add_argument("--speed-limit", type=float, default=0.15,
+                        help="Force mode speed limit in m/s (default: 0.15)")
+    parser.add_argument("--distance", type=float, default=0.1,
+                        help="MoveL distance in meters (default: 0.1 = 100mm)")
+    parser.add_argument("--speed", type=float, default=0.05,
+                        help="MoveL speed in m/s (default: 0.05 = 50mm/s)")
     args, _ = parser.parse_known_args()
 
     rclpy.init()
-    node = ForcePushTest(args.force, args.time)
+    node = ForcePushTest(args.force, args.speed_limit, args.distance, args.speed)
     try:
         node.run()
     finally:

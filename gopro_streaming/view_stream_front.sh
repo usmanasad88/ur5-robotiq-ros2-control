@@ -94,6 +94,13 @@ if [[ "$PLAYER" == "auto" ]]; then
     fi
 fi
 
+# ── Initialize GoPro Stream ─────────────────────────────────────────
+echo "Initializing GoPro Stream via HTTP API..."
+curl -s "http://${CAMERA_IP}:8080/gopro/camera/control/wired_usb?p=1" > /dev/null
+sleep 0.3
+curl -s "http://${CAMERA_IP}:8080/gopro/camera/stream/start" > /dev/null
+sleep 0.5
+
 # ── Build filter chain ──────────────────────────────────────────────
 #
 # The webcam stream is 1408×704 with two 704×704 fisheye lenses
@@ -144,7 +151,7 @@ case $PLAYER in
             -avioflags direct \
             "${VF_ARGS[@]}" \
             -window_title "$TITLE" \
-            "$UDP_URL"
+            "$UDP_URL?buffer_size=10000000"
         ;;
 
     mpv)
