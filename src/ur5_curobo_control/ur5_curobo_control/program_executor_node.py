@@ -774,6 +774,16 @@ class UR5ProgramExecutorNode(Node):
         # Force mode service clients
         self._force_mode_active = False
         self._last_force_mode_instruction = None
+        
+        self._dashboard_stop_client = self.create_client(
+            Trigger, '/dashboard_client/stop',
+            callback_group=self.callback_group
+        )
+        self._dashboard_play_client = self.create_client(
+            Trigger, '/dashboard_client/play',
+            callback_group=self.callback_group
+        )
+        
         self._switch_controller_client = self.create_client(
             SwitchController, '/controller_manager/switch_controller',
             callback_group=self.callback_group
@@ -1690,7 +1700,26 @@ class UR5ProgramExecutorNode(Node):
 
         self._force_mode_active = False
         self.get_logger().info("Force mode stopped (URScript)")
-        time.sleep(0.3)
+        time.sleep(0.5)
+
+        # After any primary URScript finishes, the External Control URCap program is halted.
+        # We must push "stop" and "play" on the dashboard to resume joint trajectory control via ROS.
+        if self._dashboard_stop_client.wait_for_service(timeout_sec=2.0) and \
+           self._dashboard_play_client.wait_for_service(timeout_sec=2.0):
+            self.get_logger().info("Resuming External Control program via Dashboard...")
+            req = Trigger.Request()
+            self._call_service_sync(self._dashboard_stop_client, req)
+            time.sleep(1.0)
+            res = self._call_service_sync(self._dashboard_play_client, req)
+            if res and res.success:
+                self.get_logger().info("Successfully resumed robot program")
+            else:
+                self.get_logger().warn("Failed to resume robot program")
+            # Wait a few seconds for the program to start and connect to ROS
+            time.sleep(2.0)
+        else:
+            self.get_logger().error("Dashboard services not available!")
+
         return True
 
     def _restore_trajectory_controller(self) -> bool:
@@ -1754,7 +1783,32 @@ class UR5ProgramExecutorNode(Node):
             stop_msg = String()
             stop_msg.data = "stopj(2.0)"
             self._urscript_pub.publish(stop_msg)
+            # Short wait for stopj to take effect
+            time.sleep(0.5)
+            # If not in force mode, resume the program since stopj killed External Control
+            if not self._force_mode_active:
+                if self._dashboard_stop_client.wait_for_service(timeout_sec=2.0) and \
+                   self._dashboard_play_client.wait_for_service(timeout_sec=2.0):
+                    self.get_logger().info("Resuming External Control program after stopj...")
+                    req = Trigger.Request()
+                    self._call_service_sync(self._dashboard_stop_client, req)
+                    time.sleep(1.0)
+                    self._call_service_sync(self._dashboard_play_client, req)
             return False
+
+        # If not in force mode, resume the robot program to restore ROS trajectory control
+        if not self._force_mode_active:
+            if self._dashboard_stop_client.wait_for_service(timeout_sec=2.0) and \
+               self._dashboard_play_client.wait_for_service(timeout_sec=2.0):
+                self.get_logger().info("Resuming External Control program after movel...")
+                req = Trigger.Request()
+                self._call_service_sync(self._dashboard_stop_client, req)
+                time.sleep(1.0)
+                self._call_service_sync(self._dashboard_play_client, req)
+                # Wait a little for the program to reconnect
+                time.sleep(1.0)
+            else:
+                self.get_logger().error("Dashboard services not available!")
 
         return True
 

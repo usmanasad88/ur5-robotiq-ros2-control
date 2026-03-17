@@ -106,7 +106,7 @@ SEQUENCE = [
     "move_resin_from_storage_to_workplace.prog",
     #"move_roller_from_storage_to_workplace.prog",
     # "move_hardener_from_workplace_to_storage.prog",
-    "use_roller_to_consolidate.prog",
+    "use_roller_to_consolidate_in_force_mode.prog",
     "move_resin_from_workplace_to_storage.prog",
     # "move_roller_from_workplace_to_storage.prog",
 ]
