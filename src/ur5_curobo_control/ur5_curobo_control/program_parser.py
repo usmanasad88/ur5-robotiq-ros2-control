@@ -77,8 +77,8 @@ class RobotInstruction:
     comment: Optional[str] = None
     # Named position name (for movetonamed)
     named_position: Optional[str] = None
-    # Relative move: (direction, distance_meters)
-    relative_move: Optional[Tuple[str, float]] = None
+    # Relative move: (direction_or_vector, distance_meters, reference_frame)
+    relative_move: Optional[Tuple[Union[str, List[float]], float, str]] = None
     # Sub-program filename (for runprogram)
     sub_program: Optional[str] = None
     # Condition string (for IF instructions, evaluated at runtime)
@@ -139,8 +139,13 @@ class ProgramParser:
         re.IGNORECASE
     )
     
-    MOVE_RELATIVE_PATTERN = re.compile(
-        r'moverelative\s*\(\s*(\w+)\s*(?:,\s*([0-9.]+))?\s*\)',
+    MOVE_RELATIVE_NAMED_DIR_PATTERN = re.compile(
+        r'moverelative\s*\(\s*(?:([a-zA-Z_]\w*|[\"\'][a-zA-Z_]\w*[\"\'])\s*,\s*)?([a-zA-Z_]\w*)\s*(?:,\s*([0-9.]+))?\s*\)',
+        re.IGNORECASE
+    )
+
+    MOVE_RELATIVE_VECTOR_PATTERN = re.compile(
+        r'moverelative\s*\(\s*(?:([a-zA-Z_]\w*|[\"\'][a-zA-Z_]\w*[\"\'])\s*,\s*)?\[([^\]]+)\]\s*(?:,\s*([0-9.]+))?\s*\)',
         re.IGNORECASE
     )
     
@@ -363,11 +368,12 @@ class ProgramParser:
                 named_position=name
             )
         
-        # Check for moverelative(direction, distance)
-        match = self.MOVE_RELATIVE_PATTERN.search(line)
+        # Check for moverelative(direction, distance) or moverelative(ref_pos, direction, distance)
+        match = self.MOVE_RELATIVE_NAMED_DIR_PATTERN.search(line)
         if match:
-            direction = match.group(1).lower()
-            distance = float(match.group(2)) if match.group(2) else 0.05  # default 5cm
+            ref_pos = match.group(1).strip(' "\'') if match.group(1) else "current"
+            direction = match.group(2).lower()
+            distance = float(match.group(3)) if match.group(3) else 0.05  # default 5cm
             valid_directions = ['left', 'right', 'forward', 'back', 'up', 'down']
             if direction not in valid_directions:
                 self.errors.append(f"Line {line_num}: Invalid direction '{direction}'. Use: {', '.join(valid_directions)}")
@@ -376,8 +382,35 @@ class ProgramParser:
                 type=InstructionType.MOVE_RELATIVE,
                 line_number=line_num,
                 raw_line=line,
-                relative_move=(direction, distance)
+                relative_move=(direction, distance, ref_pos)
             )
+
+        # Check for moverelative([x,y,z], distance) or moverelative(ref_pos, [x,y,z], distance)
+        match = self.MOVE_RELATIVE_VECTOR_PATTERN.search(line)
+        if match:
+            ref_pos = match.group(1).strip(' "\'') if match.group(1) else "current"
+            try:
+                vec = [float(x.strip()) for x in match.group(2).split(',')]
+                if len(vec) != 3:
+                    self.errors.append(f"Line {line_num}: moverelative vector must have 3 values [x,y,z]")
+                    return None
+                distance = float(match.group(3)) if match.group(3) else 0.05
+                # Normalize the vector
+                import math
+                mag = math.sqrt(sum(v*v for v in vec))
+                if mag < 1e-10:
+                    self.errors.append(f"Line {line_num}: moverelative vector cannot be zero")
+                    return None
+                direction = [v / mag for v in vec]
+                return RobotInstruction(
+                    type=InstructionType.MOVE_RELATIVE,
+                    line_number=line_num,
+                    raw_line=line,
+                    relative_move=(direction, distance, ref_pos)
+                )
+            except ValueError as e:
+                self.errors.append(f"Line {line_num}: Failed to parse moverelative vector: {e}")
+                return None
         
         # Check for movel([x,y,z], distance, speed, accel) - vector form
         match = self.MOVEL_VECTOR_PATTERN.search(line)
@@ -804,7 +837,7 @@ opengripper
         if inst.named_position is not None:
             print(f"    Named: {inst.named_position}")
         if inst.relative_move is not None:
-            print(f"    Relative: {inst.relative_move[0]} {inst.relative_move[1]}m")
+            print(f"    Relative: {inst.relative_move[0]} {inst.relative_move[1]}m from {inst.relative_move[2]}")
         if inst.sub_program is not None:
             print(f"    Sub-program: {inst.sub_program}")
         if inst.condition_type is not None:

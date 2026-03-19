@@ -121,8 +121,10 @@ class UR5ProgramExecutorNode(Node):
             ParameterDescriptor(description='Type for saving position: joint or pose'))
         
         # Parameters for relative motion commands
+        self.declare_parameter('relative_move_reference', 'current',
+            ParameterDescriptor(description='Reference position name (optional, defaults to current)'))
         self.declare_parameter('relative_move_direction', '',
-            ParameterDescriptor(description='Direction for relative move: left/right/forward/back/up/down'))
+            ParameterDescriptor(description='Direction for relative move: left/right/forward/back/up/down, or array of [x,y,z]'))
         self.declare_parameter('relative_move_distance', 0.05,
             ParameterDescriptor(description='Distance in meters for relative move (default 5cm)'))
 
@@ -1110,54 +1112,105 @@ class UR5ProgramExecutorNode(Node):
             response.message = "Cannot move: no joint state received"
             return response
         
-        direction = self.get_parameter('relative_move_direction').value.strip().lower()
+        direction_param = self.get_parameter('relative_move_direction').value.strip()
         distance = self.get_parameter('relative_move_distance').value
+        ref_pos_name = self.get_parameter('relative_move_reference').value.strip()
         
-        if not direction:
+        if not direction_param:
             response.success = False
-            response.message = "Set 'relative_move_direction' parameter (left/right/forward/back/up/down)"
+            response.message = "Set 'relative_move_direction' parameter"
             return response
         
-        # Map direction to offset in base frame
-        direction_map = {
-            'left':    [0.0, +1.0, 0.0],
-            'right':   [0.0, -1.0, 0.0],
-            'forward': [+1.0, 0.0, 0.0],
-            'back':    [-1.0, 0.0, 0.0],
-            'up':      [0.0, 0.0, +1.0],
-            'down':    [0.0, 0.0, -1.0],
-        }
+        # Check if vector
+        if direction_param.startswith('[') and direction_param.endswith(']'):
+            try:
+                vec = [float(x.strip()) for x in direction_param[1:-1].split(',')]
+                if len(vec) != 3:
+                    response.success = False
+                    response.message = "relative_move_direction vector must have 3 values [x,y,z]"
+                    return response
+                # Normalize
+                import math
+                mag = math.sqrt(sum(v*v for v in vec))
+                if mag < 1e-10:
+                    response.success = False
+                    response.message = "relative_move_direction vector cannot be zero"
+                    return response
+                direction_vec = [v / mag for v in vec]
+                direction_name = "vector"
+            except ValueError as e:
+                response.success = False
+                response.message = f"Failed to parse relative_move_direction vector: {e}"
+                return response
+        else:
+            direction_name = direction_param.lower()
+            # Map direction to offset in base frame
+            direction_map = {
+                'left':    [0.0, +1.0, 0.0],
+                'right':   [0.0, -1.0, 0.0],
+                'forward': [+1.0, 0.0, 0.0],
+                'back':    [-1.0, 0.0, 0.0],
+                'up':      [0.0, 0.0, +1.0],
+                'down':    [0.0, 0.0, -1.0],
+            }
+            
+            if direction_name not in direction_map:
+                response.success = False
+                response.message = f"Unknown direction '{direction_name}'. Use: left, right, forward, back, up, down, or [x,y,z]"
+                return response
+            direction_vec = direction_map[direction_name]
         
-        if direction not in direction_map:
-            response.success = False
-            response.message = f"Unknown direction '{direction}'. Use: left, right, forward, back, up, down"
-            return response
-        
-        offset = [d * distance for d in direction_map[direction]]
+        offset = [d * distance for d in direction_vec]
         
         try:
-            # Get current EE pose via FK
-            kin_state = self.motion_gen.kinematics.get_state(
-                self.current_joint_state.view(1, -1)
-            )
-            ee_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
-            ee_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
+            start_state = CuroboJointState.from_position(self.current_joint_state.view(1, -1))
+            
+            # Determine reference pose
+            if ref_pos_name == "current":
+                kin_state = self.motion_gen.kinematics.get_state(self.current_joint_state.view(1, -1))
+                base_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
+                base_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
+            else:
+                if self.named_positions is None:
+                    self._load_named_positions()
+                if self.named_positions is None:
+                    response.success = False
+                    response.message = f"moverelative: failed to load named positions"
+                    return response
+
+                pos = self.named_positions.get(ref_pos_name.lower())
+                if pos is None:
+                    response.success = False
+                    response.message = f"moverelative: reference position '{ref_pos_name}' not found"
+                    return response
+                
+                if pos.position_type == PositionType.POSE:
+                    base_pos = pos.position
+                    base_quat = pos.quaternion
+                elif pos.position_type == PositionType.JOINT:
+                    joint_tensor = torch.tensor(pos.joint_positions, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
+                    kin_state = self.motion_gen.kinematics.get_state(joint_tensor.view(1, -1))
+                    base_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
+                    base_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
+                else:
+                    response.success = False
+                    response.message = f"moverelative: unknown position type for '{ref_pos_name}'"
+                    return response
             
             # Apply offset to position (keep orientation unchanged)
-            target_pos = [ee_pos[i] + offset[i] for i in range(3)]
+            target_pos = [base_pos[i] + offset[i] for i in range(3)]
             
             self.get_logger().info(
-                f"Relative move: {direction} {distance:.3f}m  "
-                f"from [{ee_pos[0]:.4f}, {ee_pos[1]:.4f}, {ee_pos[2]:.4f}] "
+                f"Relative move: {direction_name} {distance:.3f}m from {ref_pos_name} "
+                f"([{base_pos[0]:.4f}, {base_pos[1]:.4f}, {base_pos[2]:.4f}]) "
                 f"to [{target_pos[0]:.4f}, {target_pos[1]:.4f}, {target_pos[2]:.4f}]"
             )
             
             # Plan motion with cuRobo
             target_pose = CuroboPose(
                 position=torch.tensor(target_pos, device=self.tensor_args.device, dtype=self.tensor_args.dtype),
-                quaternion=torch.tensor(ee_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
+                quaternion=torch.tensor(base_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
             )
-            start_state = CuroboJointState.from_position(self.current_joint_state.view(1, -1))
             
             result = self.motion_gen.plan_single(
                 start_state, target_pose,
@@ -1169,11 +1222,11 @@ class UR5ProgramExecutorNode(Node):
                 self.publish_trajectory(traj)
                 duration = self.estimate_trajectory_duration(traj)
                 response.success = True
-                response.message = f"Moving {direction} {distance:.3f}m (duration: {duration:.1f}s)"
+                response.message = f"Moving {direction_name} {distance:.3f}m (duration: {duration:.1f}s)"
                 self.get_logger().info(f"Relative move planned, executing trajectory")
             else:
                 response.success = False
-                response.message = f"Motion planning failed for {direction} move: {result.status}"
+                response.message = f"Motion planning failed for {direction_name} move: {result.status}"
                 self.get_logger().error(f"Relative move planning failed: {result.status}")
         
         except Exception as e:
@@ -1966,22 +2019,27 @@ class UR5ProgramExecutorNode(Node):
         if instruction.relative_move is None:
             return False
 
-        direction, distance = instruction.relative_move
+        direction_or_vector, distance, ref_pos_name = instruction.relative_move
 
-        direction_map = {
-            'left':    [0.0, +1.0, 0.0],
-            'right':   [0.0, -1.0, 0.0],
-            'forward': [+1.0, 0.0, 0.0],
-            'back':    [-1.0, 0.0, 0.0],
-            'up':      [0.0, 0.0, +1.0],
-            'down':    [0.0, 0.0, -1.0],
-        }
+        if isinstance(direction_or_vector, list):
+            direction_vec = direction_or_vector
+            direction_name = "vector"
+        else:
+            direction_map = {
+                'left':    [0.0, +1.0, 0.0],
+                'right':   [0.0, -1.0, 0.0],
+                'forward': [+1.0, 0.0, 0.0],
+                'back':    [-1.0, 0.0, 0.0],
+                'up':      [0.0, 0.0, +1.0],
+                'down':    [0.0, 0.0, -1.0],
+            }
+            if direction_or_vector not in direction_map:
+                self.get_logger().error(f"moverelative: unknown direction '{direction_or_vector}'")
+                return False
+            direction_vec = direction_map[direction_or_vector]
+            direction_name = direction_or_vector
 
-        if direction not in direction_map:
-            self.get_logger().error(f"moverelative: unknown direction '{direction}'")
-            return False
-
-        offset = [d * distance for d in direction_map[direction]]
+        offset = [d * distance for d in direction_vec]
 
         # If force mode is active, suspend it for the trajectory move
         was_in_force_mode = self._force_mode_active
@@ -1994,26 +2052,49 @@ class UR5ProgramExecutorNode(Node):
             time.sleep(0.3)
 
         try:
-            # Get current EE pose via FK
-            kin_state = self.motion_gen.kinematics.get_state(
-                self.current_joint_state.view(1, -1)
-            )
-            ee_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
-            ee_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
+            start_state = CuroboJointState.from_position(self.current_joint_state.view(1, -1))
+            
+            # Determine reference pose
+            if ref_pos_name == "current":
+                kin_state = self.motion_gen.kinematics.get_state(self.current_joint_state.view(1, -1))
+                base_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
+                base_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
+            else:
+                if self.named_positions is None:
+                    self._load_named_positions()
+                if self.named_positions is None:
+                    self.get_logger().error(f"moverelative: failed to load named positions")
+                    return False
+                    
+                pos = self.named_positions.get(ref_pos_name.lower())
+                if pos is None:
+                    self.get_logger().error(f"moverelative: reference position '{ref_pos_name}' not found")
+                    return False
+                
+                if pos.position_type == PositionType.POSE:
+                    base_pos = pos.position
+                    base_quat = pos.quaternion
+                elif pos.position_type == PositionType.JOINT:
+                    joint_tensor = torch.tensor(pos.joint_positions, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
+                    kin_state = self.motion_gen.kinematics.get_state(joint_tensor.view(1, -1))
+                    base_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
+                    base_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
+                else:
+                    self.get_logger().error(f"moverelative: unknown position type for '{ref_pos_name}'")
+                    return False
 
-            target_pos = [ee_pos[i] + offset[i] for i in range(3)]
+            target_pos = [base_pos[i] + offset[i] for i in range(3)]
 
             self.get_logger().info(
-                f"Relative move: {direction} {distance:.3f}m  "
-                f"from [{ee_pos[0]:.4f}, {ee_pos[1]:.4f}, {ee_pos[2]:.4f}] "
+                f"Relative move: {direction_name} {distance:.3f}m from {ref_pos_name} "
+                f"([{base_pos[0]:.4f}, {base_pos[1]:.4f}, {base_pos[2]:.4f}]) "
                 f"to [{target_pos[0]:.4f}, {target_pos[1]:.4f}, {target_pos[2]:.4f}]"
             )
 
             target_pose = CuroboPose(
                 position=torch.tensor(target_pos, device=self.tensor_args.device, dtype=self.tensor_args.dtype),
-                quaternion=torch.tensor(ee_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
+                quaternion=torch.tensor(base_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
             )
-            start_state = CuroboJointState.from_position(self.current_joint_state.view(1, -1))
 
             result = self.motion_gen.plan_single(
                 start_state, target_pose,

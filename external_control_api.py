@@ -308,11 +308,13 @@ class ROSBridge:
             return False, "save_position service timeout"
         return res.success, res.message
 
-    def move_relative(self, direction: str, distance: float = 0.05):
-        """Move end-effector by a Cartesian offset in the given direction."""
-        ok1 = self.set_parameter("relative_move_direction", direction, ParameterType.PARAMETER_STRING)
+    def move_relative(self, direction: str | list[float], distance: float = 0.05, reference: str = "current"):
+        """Move end-effector by a Cartesian offset in the given direction from an optional reference pose."""
+        direction_str = str(direction) if isinstance(direction, list) else direction
+        ok1 = self.set_parameter("relative_move_direction", direction_str, ParameterType.PARAMETER_STRING)
         ok2 = self.set_parameter("relative_move_distance", distance, ParameterType.PARAMETER_DOUBLE)
-        if not (ok1 and ok2):
+        ok3 = self.set_parameter("relative_move_reference", reference, ParameterType.PARAMETER_STRING)
+        if not (ok1 and ok2 and ok3):
             return False, "Failed to set move_relative parameters"
         res = self._call_service(self.cli_move_relative, Trigger.Request(), timeout=10.0)
         if res is None:
@@ -679,19 +681,21 @@ def api_move_relative():
 
     Directions are relative to the robot base frame:
       left/right  → Y axis,  forward/back → X axis,  up/down → Z axis (gravity)
+    Alternatively, provide a list [x, y, z].
 
     Body: {"direction": "left", "distance": 0.05}
-          {"direction": "up",   "distance": 0.1}
+          {"direction": [0, 0, -1], "distance": 0.1, "reference": "Home"}
     """
     body = flask_request.get_json(silent=True) or {}
     direction = body.get("direction")
     if not direction:
-        return _err("Missing 'direction' field (left|right|forward|back|up|down)")
+        return _err("Missing 'direction' field (left|right|forward|back|up|down or [x,y,z])")
     if bridge is None:
         return _err("ROS bridge not initialised", 503)
     distance = body.get("distance", 0.05)
-    ok, msg = bridge.move_relative(direction, distance=float(distance))
-    return (_ok(msg, direction=direction, distance=distance) if ok else _err(msg))
+    reference = body.get("reference", "current")
+    ok, msg = bridge.move_relative(direction, distance=float(distance), reference=reference)
+    return (_ok(msg, direction=direction, distance=distance, reference=reference) if ok else _err(msg))
 
 
 # ---------- position saving -----------------------------------------------
