@@ -7,11 +7,12 @@
 #   3. Exporting UR_WS_PATH in your shell RC so USD assets can be found
 #
 # Usage:
-#   ./setup_isaac_extension.sh [--isaac-sim-path /path/to/isaac-sim]
+#   ./setup_isaac_extension.sh [--isaac-sim-path /path/to/isaac-sim] [--pull]
 #
 # Default Isaac Sim path: ~/isaac-sim-standalone-5.0.0-linux-x86_64
 #
 # The script is idempotent: running it multiple times has no ill effect.
+# Use --pull to copy changes from the Isaac Sim installation back to the source directory.
 
 set -euo pipefail
 
@@ -22,11 +23,16 @@ SRC_PKG="${SCRIPT_DIR}/ur_robotiq_cortex/ur_robotiq_cortex"   # Python package s
 # Argument parsing
 # ---------------------------------------------------------------------------
 ISAAC_SIM_PATH=""
+PULL_TO_SOURCE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --isaac-sim-path)
             ISAAC_SIM_PATH="$2"
             shift 2
+            ;;
+        --pull)
+            PULL_TO_SOURCE=1
+            shift
             ;;
         -h|--help)
             grep '^#' "$0" | sed 's/^# \{0,1\}//'
@@ -74,6 +80,39 @@ fi
 # Copy the Python package
 # ---------------------------------------------------------------------------
 DEST="${INTERACTIVE_PKG}/ur_robotiq_cortex"
+
+if [[ "${PULL_TO_SOURCE}" == "1" ]]; then
+    echo "[setup] Pulling changes from Isaac Sim back to source..."
+    echo "[setup] Copying from: ${DEST}"
+    echo "[setup] To: ${SRC_PKG}"
+    
+    if [[ ! -d "${DEST}" ]]; then
+        echo "ERROR: Destination directory does not exist: ${DEST}"
+        exit 1
+    fi
+    
+    rm -rf "${SRC_PKG}"
+    cp -r "${DEST}" "${SRC_PKG}"
+    
+    # Remove any cached files copied over
+    find "${SRC_PKG}" -name "__pycache__" -type d -exec rm -rf {} +
+    
+    # Revert intra-package imports in the source copy
+    for f in "${SRC_PKG}"/*.py; do
+        if [[ -f "$f" ]]; then
+            sed -i \
+                's/from isaacsim\.examples\.interactive\.ur_robotiq_cortex/from ur_robotiq_cortex/g' \
+                "$f"
+            sed -i \
+                's/import isaacsim\.examples\.interactive\.ur_robotiq_cortex/import ur_robotiq_cortex/g' \
+                "$f"
+        fi
+    done
+    
+    echo "[setup] Reverted intra-package imports in source."
+    echo "=== Pull complete ==="
+    exit 0
+fi
 
 echo "[setup] Copying Python package to: ${DEST}"
 rm -rf "${DEST}"

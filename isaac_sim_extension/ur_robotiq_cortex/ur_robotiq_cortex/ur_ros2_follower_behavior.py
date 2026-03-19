@@ -49,21 +49,11 @@ except ImportError:
     RosJointState = Any # Define as Any to prevent NameError in type hints
     print("[ROS2 Follower] ROS 2 (rclpy) not available. Please source ROS 2 environment.")
 
-# Curobo imports
+# ArticulationAction for direct control
 try:
-    import torch
-    from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
-    from curobo.geom.types import WorldConfig, Cuboid
-    from curobo.types.base import TensorDeviceType
-    from curobo.types.math import Pose
-    from curobo.types.robot import JointState
-    from curobo.util_file import get_robot_configs_path, join_path, load_yaml
-    from curobo.util.logger import setup_curobo_logger
     from omni.isaac.core.utils.types import ArticulationAction
-    CUROBO_AVAILABLE = True
 except Exception as e:
-    CUROBO_AVAILABLE = False
-    print(f"[ROS2 Follower] Curobo not available: {e}")
+    print(f"[ROS2 Follower] Could not import ArticulationAction: {e}")
 
 class ROS2FollowerContext(DfRobotApiContext):
     def __init__(self, robot, task_description: str = "Follow ROS 2 Joint States", robot_type: str = "ur10"):
@@ -77,6 +67,8 @@ class ROS2FollowerContext(DfRobotApiContext):
         self.task_description = task_description
         self.robot = robot
         self.robot_type = robot_type
+        self._disabled_arm_commander = None
+        self._arm_commander_disabled = False
         
         print(f"[ROS2 Follower] Initializing context for robot_type: {self.robot_type}")
         
@@ -99,13 +91,28 @@ class ROS2FollowerContext(DfRobotApiContext):
         else:
             print("[ROS2 Follower] ROS2_AVAILABLE is False")
 
-        # Curobo Setup
-        self.motion_gen = None
-        self.plan_config = None
-        if CUROBO_AVAILABLE:
-            self._init_curobo()
+        self._disable_arm_commander_if_needed()
 
         self.diagnostics_message = "Initializing..."
+
+    def _disable_arm_commander_if_needed(self):
+        """Disable MotionCommander stepping so ROS joint targets are not overwritten each frame."""
+        if self._arm_commander_disabled:
+            return
+        try:
+            commanders = getattr(self.robot, "commanders", None)
+            if commanders is None:
+                print("[ROS2 Follower] No commanders dict on robot; cannot disable arm commander")
+                return
+
+            if "arm" in commanders:
+                self._disabled_arm_commander = commanders.pop("arm")
+                self._arm_commander_disabled = True
+                print("[ROS2 Follower] Disabled robot arm commander to prevent RMPflow override")
+            else:
+                print("[ROS2 Follower] Arm commander not present; nothing to disable")
+        except Exception as e:
+            print(f"[ROS2 Follower] Failed to disable arm commander: {e}")
 
     def reset(self):
         """Reset the context state."""
@@ -145,21 +152,31 @@ class ROS2FollowerContext(DfRobotApiContext):
             self.node = None
 
     def _joint_state_callback(self, msg: RosJointState):
+        if not hasattr(self, '_cb_count'):
+            self._cb_count = 0
+        self._cb_count += 1
+
         # Extract joint positions for the UR arm
         current_joints = {}
         for name, pos in zip(msg.name, msg.position):
             current_joints[name] = pos
-        
+
         # Create a list of positions in the correct order
         ordered_positions = []
         for name in self.joint_names_map:
             if name in current_joints:
                 ordered_positions.append(current_joints[name])
-        
+
         if len(ordered_positions) == 6:
+            prev = self.latest_joint_state
             self.latest_joint_state = np.array(ordered_positions, dtype=np.float32)
-            # print(f"[ROS2 Follower] Callback received joint state: {self.latest_joint_state}")
-            
+
+            # Log every 60th callback, or when joints change significantly
+            changed = prev is not None and np.max(np.abs(self.latest_joint_state - prev)) > 0.01
+            if self._cb_count % 60 == 1 or changed:
+                print(f"[ROS2 Follower] CB #{self._cb_count}: joints={[f'{v:.3f}' for v in self.latest_joint_state]}"
+                      f"  changed={changed}")
+
             # Handle gripper if present
             # Robotiq 2F-85 usually has 'finger_joint'
             if "finger_joint" in current_joints:
@@ -167,52 +184,67 @@ class ROS2FollowerContext(DfRobotApiContext):
             elif "robotiq_85_left_knuckle_joint" in current_joints:
                  self.latest_gripper_pos = current_joints["robotiq_85_left_knuckle_joint"]
 
-    def _init_curobo(self):
-        # Load robot config based on type
-        try:
-            config_filename = "ur10e.yml"
-            if self.robot_type == "ur5":
-                config_filename = "ur5e.yml"
-                
-            # Try to find config
-            config_path = join_path(get_robot_configs_path(), config_filename)
-            print(f"[ROS2 Follower] Loading Curobo config from: {config_path}")
-            
-            robot_cfg = load_yaml(config_path)
-            
-            # Initialize MotionGen
-            # We add a dummy ground plane to satisfy Curobo's collision checker
-            world_cfg = WorldConfig(cuboid=[Cuboid(name="ground", dims=[10, 10, 0.1], pose=[0, 0, -0.05, 1, 0, 0, 0])])
-            
-            motion_gen_config = MotionGenConfig.load_from_robot_config(
-                robot_cfg,
-                world_model=world_cfg,
-                tensor_args=TensorDeviceType(),
-                interpolation_dt=0.01,
-            )
-            self.motion_gen = MotionGen(motion_gen_config)
-            self.motion_gen.warmup()
-            
-            self.plan_config = MotionGenPlanConfig(
-                enable_graph=False,
-                enable_opt=True,
-                max_attempts=1,
-                timeout=0.05, # Very fast timeout for following
-            )
-            print("[ROS2 Follower] Curobo initialized")
-        except Exception as e:
-            print(f"[ROS2 Follower] Failed to init Curobo: {e}")
-            traceback.print_exc()
-            self.motion_gen = None
+    def _apply_joint_targets_fast(self):
+        """Fast path: apply joint targets every frame without diagnostics overhead."""
+        target_joints = self.latest_joint_state
+        if target_joints is None:
+            return
+
+        self._disable_arm_commander_if_needed()
+
+        if not hasattr(self, '_fast_apply_count'):
+            self._fast_apply_count = 0
+        self._fast_apply_count += 1
+        if self._fast_apply_count % 120 == 0:
+            print(f"[ROS2 Follower] fast_apply #{self._fast_apply_count}: target={[f'{v:.3f}' for v in target_joints]}")
+
+        # Get articulation once
+        if not hasattr(self, '_articulation'):
+            articulation = None
+            if hasattr(self.robot, "articulation"):
+                articulation = self.robot.articulation
+            elif hasattr(self.robot, "arm") and hasattr(self.robot.arm, "articulation"):
+                articulation = self.robot.arm.articulation
+            else:
+                articulation = self.robot
+            self._articulation = articulation
+
+        articulation = self._articulation
+        if articulation is None:
+            return
+
+        # Get joint mapping once
+        if not hasattr(self, '_joint_indices'):
+            full_dof_names = articulation.dof_names
+            indices = []
+            for name in self.joint_names_map:
+                if name in full_dof_names:
+                    indices.append(full_dof_names.index(name))
+            self._joint_indices = indices
+
+        indices = self._joint_indices
+        if len(indices) != len(self.joint_names_map):
+            raise RuntimeError(f"Joint mapping incomplete: {len(indices)}/{len(self.joint_names_map)}")
+
+        # Apply directly via articulation controller; this API is supported on CortexRobot wrappers.
+        values = np.array([target_joints[i] for i in range(len(indices))], dtype=np.float32)
+        action = ArticulationAction(joint_positions=values, joint_indices=np.array(indices, dtype=np.int32))
+        articulation.apply_action(action)
 
     def update_from_ros(self):
+        if not hasattr(self, '_update_count'):
+            self._update_count = 0
+        self._update_count += 1
+
         if self.node is None and ROS2_AVAILABLE:
             print("[ROS2 Follower] ROS2 node is None, attempting to reinitialize...")
             self._init_ros2_node()
-        
+
         if self.node:
             try:
-                rclpy.spin_once(self.node, timeout_sec=0.0)
+                # Spin multiple times to drain any queued messages
+                for _ in range(10):
+                    rclpy.spin_once(self.node, timeout_sec=0.0)
             except Exception as e:
                 print(f"[ROS2 Follower] Error spinning ROS node: {e}")
                 # Node may have become invalid, try to reinitialize next time
@@ -221,186 +253,57 @@ class ROS2FollowerContext(DfRobotApiContext):
                     self.node = None
                     self.subscription = None
         else:
-            print("[ROS2 Follower] Warning: ROS2 node is None and could not be reinitialized")
+            if self._update_count % 60 == 1:
+                print("[ROS2 Follower] Warning: ROS2 node is None and could not be reinitialized")
+
+        if self._update_count % 120 == 0:
+            cb_count = getattr(self, '_cb_count', 0)
+            print(f"[ROS2 Follower] update_from_ros #{self._update_count}, callbacks received: {cb_count}, "
+                  f"latest_joint_state={'set' if self.latest_joint_state is not None else 'None'}")
             
     def follow_latest_joints(self):
         # Add counter to track how often this is called
         if not hasattr(self, '_follow_call_count'):
             self._follow_call_count = 0
         self._follow_call_count += 1
-        
+
         # Log only every 60 steps (approx 1 sec at 60Hz)
         should_log = (self._follow_call_count % 60 == 0)
-        
+
+        # Apply action on EVERY frame without logging overhead
+        # This ensures continuous command to counteract motion policy interference
+        if self.latest_joint_state is not None:
+            try:
+                # Fast path: apply without all the diagnostics
+                self._apply_joint_targets_fast()
+                return
+            except Exception:
+                # Fall through to full logic if fast path fails
+                pass
+
         if should_log:
             print(f"[ROS2 Follower] follow_latest_joints called {self._follow_call_count} times, latest_joint_state={'present' if self.latest_joint_state is not None else 'None'}")
-        
+
         try:
+            self._disable_arm_commander_if_needed()
+
             if self.latest_joint_state is None:
                 if should_log:
                     self.diagnostics_message = "Waiting for ROS 2 joint states..."
                     print("[ROS2 Follower] Waiting for ROS2 joint states...")
                 return
 
-            if not self.motion_gen:
-                if should_log:
-                    self.diagnostics_message = "Curobo not initialized. Cannot plan."
-                    print("[ROS2 Follower] Curobo not initialized")
-                return
-            
             if should_log:
                 print(f"[ROS2 Follower] Received target joints: {self.latest_joint_state}")
 
-            # Create Goal JointState
-            # We need to get the current state from the simulation to plan FROM
-            if not hasattr(self.robot, "arm"):
-                if should_log:
-                    print("[ROS2 Follower] Error: Robot object does not have 'arm' attribute")
-                self.diagnostics_message = "Robot has no 'arm' attribute"
-                return
-            
-            if should_log:
-                print("[ROS2 Follower] Getting current robot joint state...")
-
-            # Use the robot wrapper to query current joint state instead of the
-            # MotionCommander, which does not expose get_joints_state().
-            try:
-                sim_js = self.robot.get_joints_state()
-            except AttributeError:
-                if should_log:
-                    print("[ROS2 Follower] Error: robot.get_joints_state() not available")
-                return
-
-            # Build mapping from joint names to positions. If joint names are not
-            # provided in sim_js, fall back to the robot arm's articulation_subset
-            # joint names, which correspond to the commanded arm DOFs.
-            if hasattr(sim_js, "joint_names") and sim_js.joint_names is not None:
-                name_to_pos = {name: pos for name, pos in zip(sim_js.joint_names, sim_js.positions)}
-            else:
-                try:
-                    arm_subset = self.robot.arm.articulation_subset
-                    subset_names = arm_subset.joint_names
-                    subset_positions = arm_subset.get_joint_positions()
-                    name_to_pos = {name: pos for name, pos in zip(subset_names, subset_positions)}
-                except Exception as e:
-                    if should_log:
-                        print(f"[ROS2 Follower] Error building name_to_pos map: {e}")
-                    return
-
-            try:
-                start_positions = [name_to_pos[name] for name in self.joint_names_map]
-                if should_log:
-                    print(f"[ROS2 Follower] Current robot positions: {start_positions}")
-            except KeyError as missing:
-                if should_log:
-                    print(f"[ROS2 Follower] Missing joint in sim state: {missing}")
-                self.diagnostics_message = f"Missing joint: {missing}"
-                return
-
-            # Resolve cuRobo device from MotionGen's tensor_args
-            device = self.motion_gen.tensor_args.device if hasattr(self.motion_gen, "tensor_args") else "cuda"
-
-            # Start state: 1x6 tensor with UR arm joints only
-            start_tensor = torch.tensor(start_positions, device=device).view(1, -1)
-            start_state = JointState.from_position(
-                start_tensor,
-                joint_names=self.joint_names_map,
-            )
-
-            # Goal state: latest ROS joints
-            # Unwrap target joints to be closest to current simulation joints to avoid limit issues
-            # if the USD has stricter limits than the real robot.
-            current_joints_np = np.array(start_positions)
+            # Get the target joint values directly from ROS (no planning needed)
             target_joints_np = self.latest_joint_state
-            
-            # Optional: Unwrap
-            # We disable unwrapping here because we want to enforce [-pi, pi] range for PhysX stability
-            # target_joints_np = self._unwrap_joints(current_joints_np, target_joints_np)
-            
-            goal_tensor = torch.tensor(target_joints_np, device=device).view(1, -1)
-            goal_state = JointState.from_position(
-                goal_tensor,
-                joint_names=self.joint_names_map,
-            )
 
-            # Plan in joint space: use plan_single_js for JointState start/goal
             if should_log:
-                print("[ROS2 Follower] Planning joint-space trajectory...")
-            
-            result = self.motion_gen.plan_single_js(
-                start_state, goal_state, self.plan_config
-            )
-
-            if not result.success.item():
-                self.diagnostics_message = f"Planning failed: status={getattr(result, 'status', 'unknown')}"
-                if should_log:
-                    print(f"[ROS2 Follower] Planning failed: {getattr(result, 'status', 'unknown')}")
-                return
-            
-            if should_log:
-                print("[ROS2 Follower] Planning succeeded!")
-
-            # Choose a trajectory tensor, mirroring the real-robot node pattern.
-            traj = None
-            if hasattr(result, "interpolated_plan") and result.interpolated_plan is not None:
-                traj = result.interpolated_plan
-            elif hasattr(result, "optimized_plan") and result.optimized_plan is not None:
-                traj = result.optimized_plan
-            elif hasattr(result, "get_interpolated_plan"):
-                try:
-                    traj = result.get_interpolated_plan()
-                except Exception as exc:
-                    if should_log:
-                        print("[ROS2 Follower] get_interpolated_plan() failed:", exc)
-                    traj = None
-
-            if traj is None:
-                self.diagnostics_message = "Planning succeeded but no trajectory available."
-                return
-
-            # traj is typically [1, steps, dof]
-            try:
-                traj_tensor = getattr(traj, "position", traj)
-                traj_np = traj_tensor.squeeze(0).detach().cpu().numpy()
-            except Exception as exc:
-                if should_log:
-                    print("[ROS2 Follower] Failed to process trajectory tensor:", exc)
-                self.diagnostics_message = "Planning succeeded but trajectory processing failed."
-                return
-
-            if traj_np.shape[-1] != len(self.joint_names_map):
-                self.diagnostics_message = "Trajectory DOF mismatch; skipping command."
-                return
-
-            # Apply cuRobo trajectory directly to the robot articulation, bypassing MotionCommander.
-            # This follows the VLA behavior pattern for direct cuRobo control.
-            final_js = traj_np[-1]  # Shape: (6,) for 6 arm joints
-            
-            # Check if final_js is very different from current position, which might indicate
-            # a planning jump or limit issue.
-            # diff = np.linalg.norm(final_js - current_joints_np)
-            # if diff > 1.0:
-            #     if should_log:
-            #         print(f"[ROS2 Follower] Warning: Large jump in planned trajectory: {diff:.2f}")
+                print(f"[ROS2 Follower] Target joint state: {target_joints_np}")
             
             try:
-                # IMPORTANT: Disable the arm's motion commander to allow direct articulation control
-                # The MotionCommander uses RMPflow which overrides direct joint commands
-                if hasattr(self.robot, "arm"):
-                    if hasattr(self.robot.arm, "disable"):
-                        # Only log disable once
-                        if not hasattr(self, "_arm_disabled_logged"):
-                            print("[ROS2 Follower] Disabling arm motion commander for direct control")
-                            self._arm_disabled_logged = True
-                        self.robot.arm.disable()
-                    else:
-                        if should_log:
-                            print("[ROS2 Follower] Robot arm has no 'disable' method")
-                else:
-                    if should_log:
-                        print("[ROS2 Follower] Robot has no 'arm' attribute")
-                
-                # Get the robot's articulation
+                # Get the robot's articulation directly, bypassing MotionCommander
                 articulation = None
                 if hasattr(self.robot, "articulation"):
                     articulation = self.robot.articulation
@@ -409,6 +312,39 @@ class ROS2FollowerContext(DfRobotApiContext):
                 else:
                     # Fallback: robot itself might be the articulation
                     articulation = self.robot
+
+                # CRITICAL: Bypass the MotionCommander completely on first call
+                # The MotionCommander's RMPflow policy will override our commands
+                if not hasattr(self, "_commander_bypass_setup"):
+                    print("[ROS2 Follower] Setting up to bypass MotionCommander")
+                    if hasattr(self.robot, "arm"):
+                        arm = self.robot.arm
+                        # Try to deactivate the arm's update function
+                        if hasattr(arm, "active"):
+                            print(f"[ROS2 Follower] Arm active state: {arm.active}")
+                            # Set active to False to stop it from running
+                            try:
+                                arm.active = False
+                                print("[ROS2 Follower] Set arm.active = False")
+                            except Exception as e:
+                                print(f"[ROS2 Follower] Could not set arm.active: {e}")
+                        # Try to stop the motion policy update
+                        if hasattr(arm, "motion_policy") and arm.motion_policy:
+                            mp = arm.motion_policy
+                            if hasattr(mp, "pause"):
+                                try:
+                                    mp.pause()
+                                    print("[ROS2 Follower] Paused motion policy")
+                                except Exception as e:
+                                    print(f"[ROS2 Follower] Could not pause motion policy: {e}")
+                            # Try to clear the policy frame
+                            if hasattr(mp, "reset"):
+                                try:
+                                    mp.reset()
+                                    print("[ROS2 Follower] Reset motion policy")
+                                except Exception as e:
+                                    pass
+                    self._commander_bypass_setup = True
                 
                 if articulation is None:
                     if should_log:
@@ -430,7 +366,7 @@ class ROS2FollowerContext(DfRobotApiContext):
                     if name in full_dof_names:
                         idx = full_dof_names.index(name)
                         indices.append(idx)
-                        val = final_js[i]
+                        val = target_joints_np[i]
                         
                         # Check limits
                         if should_log:
@@ -453,9 +389,7 @@ class ROS2FollowerContext(DfRobotApiContext):
                 # However, if the robot is stuck, maybe we need to force it?
                 # For "following", we usually want the robot to just BE there.
                 
-                # Ensure values are within [-pi, pi] to avoid PhysX errors
-                # PhysX setDriveTarget requires [-2pi, 2pi], but we use [-pi, pi] to be safe and consistent
-                values = [((v + np.pi) % (2 * np.pi)) - np.pi for v in values]
+                values = np.array(values, dtype=np.float32)
 
                 # Debug: Check drive properties before applying action
                 if should_log:
@@ -466,19 +400,23 @@ class ROS2FollowerContext(DfRobotApiContext):
                             name = full_dof_names[idx]
                             stiffness = dof_props["stiffness"][idx]
                             damping = dof_props["damping"][idx]
-                            max_effort = dof_props["max_effort"][idx]
+                            max_effort = dof_props["maxEffort"][idx]
                             print(f"[ROS2 Follower]   {name}: stiffness={stiffness:.1f}, damping={damping:.1f}, max_effort={max_effort:.1f}")
                     except Exception as e:
                         print(f"[ROS2 Follower] Could not read drive properties: {e}")
 
-                # Apply joint targets using ArticulationAction
-                action = ArticulationAction(
-                    joint_positions=np.array(values),
-                    joint_indices=np.array(indices)
-                )
-                articulation.apply_action(action)
-                
-                # Debug: Check if there's a motion policy overriding our commands
+                try:
+                    action = ArticulationAction(
+                        joint_positions=values,
+                        joint_indices=np.array(indices, dtype=np.int32),
+                    )
+                    articulation.apply_action(action)
+                    if should_log:
+                        print("[ROS2 Follower] Applied articulation action")
+                except Exception as e:
+                    if should_log:
+                        print(f"[ROS2 Follower] Failed to apply articulation action: {e}")
+
                 if should_log:
                     print(f"[ROS2 Follower] Applied action to {len(indices)} joints")
                     print(f"[ROS2 Follower]   Target: {[f'{v:.3f}' for v in values]}")
@@ -506,7 +444,7 @@ class ROS2FollowerContext(DfRobotApiContext):
                     new_positions = articulation.get_joint_positions()
                     print(f"[ROS2 Follower]   Positions after apply: {[f'{new_positions[i]:.3f}' for i in indices]}")
                     
-                self.diagnostics_message = "Applied cuRobo joint trajectory."
+                self.diagnostics_message = "Applied ROS 2 joint trajectory."
             except Exception as exc:
                 if should_log:
                     print("[ROS2 Follower] Failed to apply articulation action:", exc)
@@ -525,6 +463,13 @@ class ROS2FollowerContext(DfRobotApiContext):
 
     def shutdown(self):
         """Clean up ROS 2 resources."""
+        if self._disabled_arm_commander is not None and hasattr(self.robot, "commanders"):
+            if "arm" not in self.robot.commanders:
+                self.robot.commanders["arm"] = self._disabled_arm_commander
+                print("[ROS2 Follower] Restored robot arm commander")
+            self._disabled_arm_commander = None
+            self._arm_commander_disabled = False
+
         if self.node:
             print("[ROS2 Follower] Destroying ROS 2 node...")
             try:

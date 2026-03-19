@@ -7,7 +7,7 @@ import traceback
 import uuid
 from typing import Optional, Sequence
 from pathlib import Path
-from pxr import Gf, Usd
+from pxr import Gf, Usd, Sdf
 
 from isaacsim.core.api.objects import DynamicCuboid
 from isaacsim.cortex.framework.cortex_utils import load_behavior_module
@@ -44,6 +44,7 @@ def _get_ur_ws_root() -> Path:
 
 UR5_USD_RELATIVE  = "isaac_standalone/Collected_ur10e_robotiq2f-140_ROS/ur5_robotiq2f-85.usd"
 UR10_USD_RELATIVE = "isaac_standalone/Collected_ur10e_robotiq2f-140_ROS/ur10e_robotiq2f-140_ROS.usd"
+ENABLE_OBJECT_COLLISIONS = False
 
 # ---------------------------------------------------------------------------
 
@@ -231,21 +232,48 @@ class URRobotiqCortex(CortexBase):
         except Exception as e:
             LOGGER(f"Error adding robot_base: {e}")
 
-        # Object specifications from Scene.usda
+        # Object specifications from Scene_with_Colliders.usda
         objects = [
-            ("box.glb", "box", [0.9174, -0.29926, 0.05085], [0.3, 0.3, 0.3], [1, 0, 0, 0]),
-            ("bottle.glb", "bottle", [1.0116872461300208, -0.0987870064384707, 0.05321864561837606], [0.15, 0.15, 0.15], [1, 0, 0, 0]),
-            ("mold.glb", "mold", [1.108707993901868, 0.459950646722579, 9.547918011776345e-15], [0.2, 0.2, 0.2], [1, 0, 0, 0]),
-            ("chair.glb", "chair", [1.3128894384148293, 0.8545256234274397, -0.27231766681465197], [0.6, 0.6, 0.6], [0.9377559, 0, 0, -0.34729514]),
-            ("table.glb", "table", [0.7636514390089982, 0.6177071396631896, -0.30026916624570116], [1, 1, 1], [0.946387, 0, 0, -0.32303506]),
-            ("roller.glb", "roller", [0.8831616495788102, -0.25242231112362945, 0.1430787020742762], [0.3, 0.3, 0.3], [1, 0, 0, 0]),
-            ("scale.usd", "scale", [0.895776507284684, 0.6064892383348871, -0.010653778094958904], [0.2, 0.2, 0.2], [1, 0, 0, 0]),
-            ("table.glb", "table_01", [0.9413563779556879, -0.43025008797395053, -0.300269166245701], [1, 1, 1], [0.47614548, 0, 0, -0.8793665]),
-            ("bottle.glb", "bottle_01", [1.0796799928205851, -0.0066494148867218975, 0.052028584976885166], [0.15, 0.15, 0.15], [1, 0, 0, 0]),
-            ("chair.glb", "chair_01", [0.9727215171318123, 1.1478893615620027, -0.27231766681466024], [0.6, 0.6, 0.6], [0.9377559, 0, 0, -0.34729514]),
-            ("chair.glb", "chair_02", [1.4550232149586235, -0.4619864365429003, -0.27231766681467223], [0.6, 0.6, 0.6], [0.4962087, 0, 0, -0.8682033]),
-            ("chair.glb", "chair_03", [1.2261491913826454, -0.8485005745177336, -0.2723176668146639], [0.6, 0.6, 0.6], [0.4962087, 0, 0, -0.8682033]),
+            ("box.glb", "box", [0.49722701311199985, -0.34048228369978817, 0.05360292097709479], [0.3, 0.3, 0.3], [0.32061204, 0, 0, 0.9472106]),
+            ("bottle.glb", "bottle", [0.5800209324356553, -0.1527813228760586, 0.05321864561836054], [0.15, 0.15, 0.15], [0.99865484, 0, 0, -0.051850803]),
+            ("mold.glb", "mold", [0.7343768852879023, 0.39290634454662376, -3.9968028886505635e-15], [0.2, 0.2, 0.2], [0.99865484, 0, 0, -0.051850803]),
+            ("chair.glb", "chair", [0.9783185865827041, 0.7642174282681263, -0.2723176668146643], [0.6, 0.6, 0.6], [0.91848963, 0, 0, -0.39544505]),
+            ("table.glb", "table", [0.40751076980419687, 0.585545072968619, -0.3002691662457132], [1, 1, 1], [0.9283668, 0, 0, -0.37166533]),
+            ("roller.glb", "roller", [0.38865587218397135, -0.25403093231232016, 0.1162865360942449], [0.2, 0.2, 0.2], [0.8992645, -0.1307176, -0.026272245, 0.41658854]),
+            ("scale.usd", "scale", [0.5377639766324959, 0.5607060494771908, -0.01065377809497281], [0.2, 0.2, 0.2], [0.99865484, 0, 0, -0.051850803]),
+            ("table.glb", "table_01", [0.4290450374269394, -0.4724786362445588, -0.3002691662457002], [1, 1, 1], [0.39768806, 0, 0, -0.9175207]),
+            ("bottle.glb", "bottle_01", [0.6388272256882447, -0.0793344055129491, 0.05202858497688473], [0.15, 0.15, 0.15], [0.9961933, 0, 0, -0.08717184]),
+            ("chair.glb", "chair_01", [0.6703568269349313, 1.091228211143767, -0.2723176668146726], [0.6, 0.6, 0.6], [0.91848963, 0, 0, -0.39544505]),
+            ("chair.glb", "chair_02", [0.9293963852024894, -0.5929333747826205, -0.27231766681467906], [0.6, 0.6, 0.6], [0.41864794, 0, 0, -0.9081486]),
+            ("chair.glb", "chair_03", [0.6368797985300714, -0.9338300512753911, -0.2723176668146614], [0.6, 0.6, 0.6], [0.41864794, 0, 0, -0.9081486]),
         ]
+
+        def add_sdf_collision(prim_path):
+            """Apply SDF collision APIs to the inner geometry_0/geometry_0 prim.
+
+            GLB files import as: <obj>/geometry_0/geometry_0
+            The USDA applies apiSchemas on the inner geometry_0:
+              PhysicsRigidBodyAPI, PhysicsCollisionAPI,
+              PhysicsMeshCollisionAPI, PhysxSDFMeshCollisionAPI
+            plus sets physics:approximation = "sdf".
+            """
+            from pxr import UsdPhysics, PhysxSchema
+            inner_path = f"{prim_path}/geometry_0/geometry_0"
+            inner_prim = stage.GetPrimAtPath(inner_path)
+            if not inner_prim.IsValid():
+                LOGGER(f"Inner geometry prim not found at {inner_path}")
+                return
+            # Apply all four API schemas (matches USDA)
+            UsdPhysics.RigidBodyAPI.Apply(inner_prim)
+            UsdPhysics.CollisionAPI.Apply(inner_prim)
+            UsdPhysics.MeshCollisionAPI.Apply(inner_prim)
+            PhysxSchema.PhysxSDFMeshCollisionAPI.Apply(inner_prim)
+            # Set approximation token
+            approx_attr = inner_prim.GetAttribute("physics:approximation")
+            if not approx_attr.IsValid():
+                approx_attr = inner_prim.CreateAttribute("physics:approximation", Sdf.ValueTypeNames.Token)
+            approx_attr.Set("sdf")
+            LOGGER(f"Applied SDF collision APIs to {inner_path}")
 
         for obj_file, obj_name, position, scale, orientation in objects:
             try:
@@ -254,6 +282,8 @@ class URRobotiqCortex(CortexBase):
                     prim_path = f"/World/Objects/{obj_name}"
                     add_reference_to_stage(usd_path=obj_path, prim_path=prim_path)
                     set_prim_transform(prim_path, position, scale, orientation)
+                    if ENABLE_OBJECT_COLLISIONS:
+                        add_sdf_collision(prim_path)
                     LOGGER(f"Loaded {obj_name}")
                 else:
                     LOGGER(f"Object file not found: {obj_path}")
@@ -262,10 +292,41 @@ class URRobotiqCortex(CortexBase):
 
         # Add ground plane underneath with correct position
         try:
-            world.scene.add_default_ground_plane()
-            # Position the ground plane at the correct z-offset from Scene.usda
-            set_prim_transform("/World/defaultGroundPlane", [0, 0, -0.5762087103635386], [1, 1, 1], [1, 0, 0, 0])
-            LOGGER("Added ground plane")
+            ground_env_path = "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Environments/Grid/default_environment.usd"
+            add_reference_to_stage(usd_path=ground_env_path, prim_path="/World/defaultGroundPlane")
+
+            ground_prim = stage.GetPrimAtPath("/World/defaultGroundPlane")
+            if ground_prim.IsValid():
+                # Set translate
+                trans_attr = ground_prim.GetAttribute("xformOp:translate")
+                if not trans_attr.IsValid():
+                    trans_attr = ground_prim.CreateAttribute("xformOp:translate", Sdf.ValueTypeNames.Double3)
+                trans_attr.Set(Gf.Vec3d(0, 0, -0.5756668343033488))
+
+                # Set orient (quaternion)
+                orient_attr = ground_prim.GetAttribute("xformOp:orient")
+                if not orient_attr.IsValid():
+                    orient_attr = ground_prim.CreateAttribute("xformOp:orient", Sdf.ValueTypeNames.Quatd)
+                orient_attr.Set(Gf.Quatd(1, 0, 0, 0))
+
+                # Set scale
+                scale_attr = ground_prim.GetAttribute("xformOp:scale")
+                if not scale_attr.IsValid():
+                    scale_attr = ground_prim.CreateAttribute("xformOp:scale", Sdf.ValueTypeNames.Double3)
+                scale_attr.Set(Gf.Vec3d(1, 1, 1))
+
+                # Set xformOpOrder to enable transforms
+                order_attr = ground_prim.GetAttribute("xformOpOrder")
+                if not order_attr.IsValid():
+                    order_attr = ground_prim.CreateAttribute("xformOpOrder", Sdf.ValueTypeNames.TokenArray, True)
+                order_attr.Set(Usd.Tokens.xformOpOrder)
+                # Manually set the order list
+                order_attr.Clear()
+                order_attr.Set(["xformOp:translate", "xformOp:orient", "xformOp:scale"])
+
+                LOGGER("Added ground plane at z=-0.5756668343033488")
+            else:
+                LOGGER("Could not create ground plane prim")
         except Exception as e:
             LOGGER(f"Error adding ground plane: {e}")
 
@@ -321,6 +382,38 @@ class URRobotiqCortex(CortexBase):
             except Exception as e:
                 LOGGER(f"Error retrieving robot: {e}")
                 return
+
+        # Initialize robot from Home pose (degrees: 55, -90, 90, 210, -90, 0)
+        try:
+            home_joint_angles = np.array([55, -90, 90, 210, -90, 0], dtype=np.float32)
+            home_joint_angles_rad = np.deg2rad(home_joint_angles)
+
+            arm_joint_names = [
+                "shoulder_pan_joint",
+                "shoulder_lift_joint",
+                "elbow_joint",
+                "wrist_1_joint",
+                "wrist_2_joint",
+                "wrist_3_joint",
+            ]
+
+            dof_names = list(self.robot.dof_names)
+            arm_indices = [dof_names.index(name) for name in arm_joint_names if name in dof_names]
+            if len(arm_indices) != 6:
+                raise RuntimeError(
+                    f"Could not map all arm joints for home pose. Mapped {len(arm_indices)}/6; dof_names={dof_names}"
+                )
+
+            full_joint_positions = np.array(self.robot.get_joint_positions(), dtype=np.float32)
+            for arm_i, dof_i in enumerate(arm_indices):
+                full_joint_positions[dof_i] = home_joint_angles_rad[arm_i]
+
+            self.robot.set_joint_positions(full_joint_positions)
+            LOGGER(
+                f"Initialized robot to Home pose (arm joints only): {home_joint_angles} degrees"
+            )
+        except Exception as e:
+            LOGGER(f"Error initializing robot to Home pose: {e}")
 
         if self._use_direct_ros2:
             try:
