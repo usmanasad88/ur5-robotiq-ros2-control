@@ -177,12 +177,13 @@ class ROS2FollowerContext(DfRobotApiContext):
                 print(f"[ROS2 Follower] CB #{self._cb_count}: joints={[f'{v:.3f}' for v in self.latest_joint_state]}"
                       f"  changed={changed}")
 
-            # Handle gripper if present
-            # Robotiq 2F-85 usually has 'finger_joint'
-            if "finger_joint" in current_joints:
-                self.latest_gripper_pos = current_joints["finger_joint"]
-            elif "robotiq_85_left_knuckle_joint" in current_joints:
-                 self.latest_gripper_pos = current_joints["robotiq_85_left_knuckle_joint"]
+        # Handle gripper — checked for EVERY message since the gripper
+        # joint state publisher sends separate messages with only
+        # ['robotiq_85_left_knuckle_joint'] (no arm joints).
+        if "finger_joint" in current_joints:
+            self.latest_gripper_pos = current_joints["finger_joint"]
+        elif "robotiq_85_left_knuckle_joint" in current_joints:
+            self.latest_gripper_pos = current_joints["robotiq_85_left_knuckle_joint"]
 
     def _apply_joint_targets_fast(self):
         """Fast path: apply joint targets every frame without diagnostics overhead."""
@@ -196,7 +197,8 @@ class ROS2FollowerContext(DfRobotApiContext):
             self._fast_apply_count = 0
         self._fast_apply_count += 1
         if self._fast_apply_count % 120 == 0:
-            print(f"[ROS2 Follower] fast_apply #{self._fast_apply_count}: target={[f'{v:.3f}' for v in target_joints]}")
+            gripper_dbg = f", gripper={self.latest_gripper_pos:.3f}" if self.latest_gripper_pos is not None else ""
+            print(f"[ROS2 Follower] fast_apply #{self._fast_apply_count}: target={[f'{v:.3f}' for v in target_joints]}{gripper_dbg}")
 
         # Get articulation once
         if not hasattr(self, '_articulation'):
@@ -213,7 +215,7 @@ class ROS2FollowerContext(DfRobotApiContext):
         if articulation is None:
             return
 
-        # Get joint mapping once
+        # Get joint mapping once (arm + gripper)
         if not hasattr(self, '_joint_indices'):
             full_dof_names = articulation.dof_names
             indices = []
@@ -222,13 +224,30 @@ class ROS2FollowerContext(DfRobotApiContext):
                     indices.append(full_dof_names.index(name))
             self._joint_indices = indices
 
+            # Find gripper finger_joint index in the articulation DOFs
+            if "finger_joint" in full_dof_names:
+                self._gripper_dof_index = full_dof_names.index("finger_joint")
+                print(f"[ROS2 Follower] Mapped gripper finger_joint to DOF index {self._gripper_dof_index}")
+            else:
+                self._gripper_dof_index = None
+                print(f"[ROS2 Follower] WARNING: finger_joint not found in DOF names: {full_dof_names}")
+
         indices = self._joint_indices
         if len(indices) != len(self.joint_names_map):
             raise RuntimeError(f"Joint mapping incomplete: {len(indices)}/{len(self.joint_names_map)}")
 
-        # Apply directly via articulation controller; this API is supported on CortexRobot wrappers.
-        values = np.array([target_joints[i] for i in range(len(indices))], dtype=np.float32)
-        action = ArticulationAction(joint_positions=values, joint_indices=np.array(indices, dtype=np.int32))
+        # Build joint targets: arm joints + gripper (if available)
+        all_indices = list(indices)
+        all_values = [target_joints[i] for i in range(len(indices))]
+
+        if self._gripper_dof_index is not None and self.latest_gripper_pos is not None:
+            all_indices.append(self._gripper_dof_index)
+            all_values.append(self.latest_gripper_pos)
+
+        action = ArticulationAction(
+            joint_positions=np.array(all_values, dtype=np.float32),
+            joint_indices=np.array(all_indices, dtype=np.int32),
+        )
         articulation.apply_action(action)
 
     def update_from_ros(self):
@@ -354,7 +373,14 @@ class ROS2FollowerContext(DfRobotApiContext):
                 
                 # Map cuRobo joint names to full articulation DOF indices
                 full_dof_names = articulation.dof_names
-                
+
+                # Ensure gripper DOF index is set for slow path too
+                if not hasattr(self, '_gripper_dof_index'):
+                    if "finger_joint" in full_dof_names:
+                        self._gripper_dof_index = full_dof_names.index("finger_joint")
+                    else:
+                        self._gripper_dof_index = None
+
                 # Get limits for debugging
                 lower_limits = articulation.dof_properties["lower"]
                 upper_limits = articulation.dof_properties["upper"]
@@ -452,9 +478,13 @@ class ROS2FollowerContext(DfRobotApiContext):
                 self.diagnostics_message = "Failed to apply articulation action."
                 return
 
-            # Gripper
-            if self.latest_gripper_pos is not None:
-                self.robot.gripper.send_joint_positions(np.array([self.latest_gripper_pos]))
+            # Gripper — apply via ArticulationAction (same as fast path)
+            if self.latest_gripper_pos is not None and hasattr(self, '_gripper_dof_index') and self._gripper_dof_index is not None:
+                gripper_action = ArticulationAction(
+                    joint_positions=np.array([self.latest_gripper_pos], dtype=np.float32),
+                    joint_indices=np.array([self._gripper_dof_index], dtype=np.int32),
+                )
+                articulation.apply_action(gripper_action)
         except Exception as e:
             if should_log:
                 print(f"[ROS2 Follower] Error in follow_latest_joints: {e}")

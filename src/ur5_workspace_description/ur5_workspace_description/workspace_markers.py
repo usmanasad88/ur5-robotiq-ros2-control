@@ -29,14 +29,21 @@ class WorkspaceMarkersPublisher(Node):
 
     MESH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../isaac_standalone/Objects")
 
-    # Default objects — edit here to add/remove meshes.
+    # Default objects — positions from Isaac Sim scene (ur_robotiq_cortex.py).
     # Each: (name, glb_file, x, y, z, roll, pitch, yaw, sx, sy, sz)
     DEFAULTS = [
-        ("table1", "table.glb",      0.547, -0.371, -0.5,  90.0, 0.0, 0.0,  1.0, 1.0, 1.0),
-        ("table2", "table.glb",      0.684,  0.474, -0.5,  90.0, 0.0, 90.0, 1.0, 1.0, 1.0),
-        ("base",   "robot_base.glb", 0.0,    0.0,   -0.1,  90.0, 0.0, 0.0,  0.8, 0.8, 0.8),
-        ("bottle", "bottle.glb",     0.6,   -0.2,   -0.5,  90.0, 0.0, 0.0,  0.4, 0.4, 0.4),
-        ("roller", "roller.glb",     0.6,   -0.6,   -0.5,  90.0, 0.0, 0.0,  0.4, 0.4, 0.4),
+        ("base",       "robot_base.glb", -0.0096,  0.0025, -0.3590,  90.0,   0.0,  47.4,  0.6,  0.6,  0.77),
+        ("box",        "box.glb",         0.3020, -0.7994, -0.0526,  90.0,   0.0,  95.6,  0.3,  0.3,  0.3),
+        ("bottle",     "bottle.glb",      0.6219, -0.7439, -0.0393,  90.0,   0.0, -52.9,  0.18, 0.18, 0.18),
+        ("mold",       "mold.glb",        1.0001, -0.4726, -0.1062,  90.0,   0.0, -52.9,  0.2,  0.2,  0.2),
+        ("chair",      "chair.glb",       1.4380, -0.3977, -0.4433,  90.0,   0.0, -93.6,  0.6,  0.6,  0.6),
+        ("table",      "table.glb",       0.9180, -0.1021, -0.4362,  90.0,   0.0, -90.0,  1.12, 1.12, 1.12),
+        ("roller",     "roller.glb",      0.2912, -0.6610,  0.0101,  75.1,   3.5,   2.3,  0.2,  0.2,  0.2),
+        ("table_01",   "table.glb",       0.2069, -0.9349, -0.4362,  90.0,   0.0, 180.0,  1.12, 1.12, 1.12),
+        ("bottle_01",  "bottle.glb",      0.4859, -0.7444, -0.0381,  90.0,   0.0, -57.0,  0.18, 0.18, 0.18),
+        ("chair_01",   "chair.glb",       1.4671,  0.0506, -0.4433,  90.0,   0.0, -93.6,  0.6,  0.6,  0.6),
+        ("chair_02",   "chair.glb",       0.4122, -1.2876, -0.4433,  90.0,   0.0,-177.5,  0.6,  0.6,  0.6),
+        ("chair_03",   "chair.glb",      -0.0366, -1.3062, -0.4433,  90.0,   0.0,-177.5,  0.6,  0.6,  0.6),
     ]
 
     PARAM_KEYS = ("x", "y", "z", "roll", "pitch", "yaw", "scale_x", "scale_y", "scale_z")

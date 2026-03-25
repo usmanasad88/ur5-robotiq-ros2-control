@@ -7,8 +7,8 @@
                 double radius = 5
             }
             dictionary Perspective = {
-                double3 position = (1.368039597126202, 0.4119378862370944, 0.7080038113637726)
-                double3 target = (-2.759538305530916, -4.718520311246285, -3.0221790905899883)
+                double3 position = (1.5089407723541786, -0.9015478382742025, 0.9920339144156646)
+                double3 target = (-3.9716450930210527, 8.815027317015101, -6.69466944298849)
             }
             dictionary Right = {
                 double3 position = (0, -5, 0)
@@ -47,9 +47,12 @@
             }
             dictionary "/World/robot_base" = {
             }
+            dictionary "/sample_2_layup_gesture_demo_stationary_with_overlay_mesh_000" = {
+            }
             int version = 1
         }
         dictionary omni_layer = {
+            string authoring_layer = "./Scene_with_Colliders.usda"
             dictionary locked = {
             }
             dictionary muteness = {
@@ -103,6 +106,7 @@ def "Render" (
                 bool omni:rtx:rt:lightcache:spatialCache:dontResolveConflicts = 1
                 bool omni:rtx:scene:hydra:materialSyncLoads = 1
                 bool omni:rtx:scene:hydra:mdlMaterialWarmup = 1
+                bool omni:rtx:scene:useViewLightingMode
                 uint omni:rtx:viewTile:limit = 4294967295
                 rel orderedVars = </Render/Vars/LdrColor>
                 custom bool overrideClipRange = 0
@@ -479,7 +483,7 @@ def "World"
             quatf xformOp:orient = (1, 0, 0, 0)
             double xformOp:rotateX:unitsResolve = 90
             float3 xformOp:scale = (0.3, 0.3, 0.3)
-            double3 xformOp:translate = (0.8831616495788102, -0.25242231112362945, 0.5000000074505806)
+            double3 xformOp:translate = (0.8831616495788102, -0.25242231112362945, 0.15170138632988517)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:rotateX:unitsResolve"]
 
             over "geometry_0"
@@ -661,6 +665,27 @@ def "World"
             float physics:restitution = 0.8
             float physics:staticFriction = 0.5
         }
+    }
+}
+
+def "sample_2_layup_gesture_demo_stationary_with_overlay_mesh_000" (
+    displayName = "sample_2_layup_gesture_demo_stationary_with_overlay_mesh_000"
+    prepend payload = @../../../Fast-SAM-3D-Body/output/layup_image_test/sample_2_layup_gesture_demo_stationary_with_overlay_mesh_000.usd@
+)
+{
+    quatf xformOp:orient = (0.7407401, 0, 0, 0.6717917)
+    double xformOp:rotateX:unitsResolve = 90
+    float3 xformOp:scale = (60, 60, 60)
+    double3 xformOp:scale:unitsResolve = (0.01, 0.01, 0.01)
+    double3 xformOp:translate = (0.9836679625019004, 1.1209037243032245, -0.16573476593336103)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:rotateX:unitsResolve", "xformOp:scale:unitsResolve"]
+
+    over "mesh_"
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (-0.5212633457067175, 0.5598394759938359, 1.8664064944892862)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
     }
 }
 

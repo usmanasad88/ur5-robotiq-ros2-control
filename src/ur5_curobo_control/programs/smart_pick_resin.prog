@@ -36,7 +36,7 @@ endif
 # -----------------------------------------
 # Phase 3: Move to resin bottle storage
 # -----------------------------------------
-movetonamed(Above_Bottle_Resin_Storage)
+moverelative(Bottle_Resin_Storage, up, 0.15)
 wait(0.5)
 
 movetonamed(Bottle_Resin_Storage)
@@ -51,7 +51,7 @@ wait(1.0)
 # -----------------------------------------
 # Phase 5: Lift up and return home via named positions
 # -----------------------------------------
-movetonamed(Above_Bottle_Resin_Storage)
+moverelative(up, 0.15)
 wait(0.5)
 
 movetonamed(Home)
@@ -60,6 +60,9 @@ wait(0.5)
 # -----------------------------------------
 # Phase 6: Move to workspace position
 # -----------------------------------------
+moverelative(Bottle_Resin_Workspace, up, 0.15)
+wait(0.5)
+
 movetonamed(Bottle_Resin_Workspace)
 wait(0.3)
 
@@ -72,7 +75,7 @@ wait(0.5)
 # -----------------------------------------
 # Phase 8: Small retreat using relative motion
 # -----------------------------------------
-moverelative(up, 0.05)
+moverelative(up, 0.15)
 wait(0.3)
 
 # -----------------------------------------

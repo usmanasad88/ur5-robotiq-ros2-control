@@ -18,7 +18,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION="ur5"
 
-USE_FAKE="false"
+USE_FAKE="true"
 LAUNCH_UI=true
 LAUNCH_QUEST=false
 LAUNCH_QUEST_SERVO=false
@@ -51,6 +51,9 @@ fi
 
 echo "Launching UR5 services  (fake=$USE_FAKE, ui=$LAUNCH_UI, quest=$LAUNCH_QUEST, spacemouse=$LAUNCH_SPACEMOUSE)"
 
+# Export USE_FAKE_HARDWARE so child processes (API, UI) can detect sim mode
+export USE_FAKE_HARDWARE="$USE_FAKE"
+
 # Kill any stale session from a previous run
 tmux kill-session -t "$SESSION" 2>/dev/null
 
@@ -71,8 +74,10 @@ tmux new-window -t "$SESSION" -n "cuRobo" \
     "echo '[cuRobo] Waiting 2s...'; sleep 2; echo '[cuRobo] Starting cuRobo control node...'; \"$SCRIPT_DIR/run_curobo.sh\"; exec bash"
 
 # Window: Program executor
+EXECUTOR_FAKE_FLAG=""
+[ "$USE_FAKE" = "true" ] && EXECUTOR_FAKE_FLAG="--fake"
 tmux new-window -t "$SESSION" -n "Executor" \
-    "echo '[Executor] Waiting 4s...'; sleep 4; echo '[Executor] Starting program executor...'; \"$SCRIPT_DIR/run_program_executor.sh\"; exec bash"
+    "echo '[Executor] Waiting 4s...'; sleep 4; echo '[Executor] Starting program executor...'; \"$SCRIPT_DIR/run_program_executor.sh\" $EXECUTOR_FAKE_FLAG; exec bash"
 
 # Window: External Control API
 tmux new-window -t "$SESSION" -n "API" \

@@ -31,8 +31,19 @@ def generate_launch_description():
         description='Path to cuRobo world config YAML'
     )
     
-    # Point directly at source tree so edits take effect without rebuilding
-    src_programs_dir = '/home/rml/ur5-robotiq-ros2-control/src/ur5_curobo_control/programs'
+    # Point directly at source tree if possible, so new files take effect without rebuilding
+    import os
+    from ament_index_python.packages import get_package_share_directory
+    share_dir = get_package_share_directory('ur5_curobo_control')
+    # share_dir is <ws>/install/ur5_curobo_control/share/ur5_curobo_control
+    # we want <ws>/src/ur5_curobo_control/programs
+    # Note: On some systems packages may be in src/something/ur5_curobo_control, but assuming standard layout:
+    workspace_dir = os.path.abspath(os.path.join(share_dir, '../../../../'))
+    src_programs_dir = os.path.join(workspace_dir, 'src', 'ur5_curobo_control', 'programs')
+    
+    if not os.path.exists(src_programs_dir):
+        # Fallback to installed share directory if not in a standard colcon workspace
+        src_programs_dir = os.path.join(share_dir, 'programs')
 
     declare_programs_dir = DeclareLaunchArgument(
         'programs_directory',

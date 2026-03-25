@@ -94,7 +94,8 @@ class ROSBridge:
         "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
     ]
 
-    def __init__(self):
+    def __init__(self, use_fake: bool = False):
+        self.use_fake = use_fake
         self.node = None
         self.latest_joint_state: JointState | None = None
         self.latest_gripper_state: JointState | None = None
@@ -225,11 +226,11 @@ class ROSBridge:
             viz_pos = 0.0
         elif action == "close":
             robotiq_pos = 0.0
-            viz_pos = 0.8
+            viz_pos = 1.0
         elif action == "position" and position is not None:
             position = max(0.0, min(1.0, position))
             robotiq_pos = (1.0 - position) * 0.085
-            viz_pos = position * 0.8
+            viz_pos = position
         else:
             return False, f"Unknown gripper action: {action}"
 
@@ -242,6 +243,10 @@ class ROSBridge:
         simple = String()
         simple.data = action if action in ("open", "close") else f"position:{position}"
         self.pub_gripper.publish(simple)
+
+        # In fake/sim mode the topic publishes above drive RViz — no action server exists
+        if self.use_fake:
+            return True, f"Gripper {action} (sim, pos={robotiq_pos:.3f}m)"
 
         # Drive the physical gripper through the Robotiq action server
         cmd = (
@@ -767,9 +772,11 @@ def main():
     parser.add_argument("--no-ros", action="store_true", help="Run without ROS (dry-run / dev mode)")
     args = parser.parse_args()
 
+    use_fake = os.environ.get("USE_FAKE_HARDWARE", "false").lower() in ("true", "1", "yes")
+
     if not args.no_ros and ROS_AVAILABLE:
-        print("🤖 Initialising ROS 2 bridge …")
-        bridge = ROSBridge()
+        print(f"🤖 Initialising ROS 2 bridge (use_fake={use_fake}) …")
+        bridge = ROSBridge(use_fake=use_fake)
     else:
         print("⚠  Running without ROS 2 bridge (dry-run mode)")
 

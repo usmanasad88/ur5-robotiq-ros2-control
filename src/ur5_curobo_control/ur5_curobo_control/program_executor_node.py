@@ -1913,7 +1913,12 @@ class UR5ProgramExecutorNode(Node):
             try:
                 # Need to source ROS environment in subprocess
                 # Unset LD_PRELOAD to avoid conflicts with the parent process's libstdc++ preload
-                env_cmd = 'unset LD_PRELOAD && source /opt/ros/humble/setup.bash && source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && ' + cmd
+                import os
+                from ament_index_python.packages import get_package_share_directory
+                pkg_share = get_package_share_directory('ur5_curobo_control')
+                workspace_dir = os.path.abspath(os.path.join(pkg_share, '../../../../'))
+                setup_bash = os.path.join(workspace_dir, 'install/setup.bash')
+                env_cmd = f'unset LD_PRELOAD && source /opt/ros/humble/setup.bash && source {setup_bash} && ' + cmd
                 result = subprocess.run(
                     env_cmd,
                     shell=True,

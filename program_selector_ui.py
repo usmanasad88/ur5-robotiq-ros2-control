@@ -116,8 +116,9 @@ st.markdown("""
 
 class ROSProgramController:
     """Controller for interacting with the program executor via ROS 2 services."""
-    
+
     def __init__(self):
+        self.use_fake = os.environ.get("USE_FAKE_HARDWARE", "false").lower() in ("true", "1", "yes")
         if not ROS_AVAILABLE:
             return
         
@@ -312,12 +313,18 @@ class ROSProgramController:
         """Send open gripper command via ROS 2 action."""
         if not ROS_AVAILABLE:
             return False, "ROS not available"
-        
+
+        # Publish visualization position (drives gripper_joint_state_publisher in sim)
+        viz_msg = Float64()
+        viz_msg.data = 0.0
+        self.gripper_viz_pub.publish(viz_msg)
+
+        # In fake/sim mode the viz topic is all that's needed — no action server exists
+        if self.use_fake:
+            return True, "Gripper opened (sim)"
+
         try:
-            # Use subprocess to call ros2 action send_goal (proven to work)
             import subprocess
-            
-            # Open = position 0.085m (85mm opening)
             cmd = (
                 'source /opt/ros/humble/setup.bash && '
                 'source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && '
@@ -325,7 +332,6 @@ class ROSProgramController:
                 'robotiq_2f_urcap_adapter/action/GripperCommand '
                 "'{command: {position: 0.085, max_effort: 255.0, max_speed: 0.1}}'"
             )
-            
             result = subprocess.run(
                 cmd,
                 shell=True,
@@ -334,12 +340,6 @@ class ROSProgramController:
                 timeout=15,
                 executable='/bin/bash'
             )
-            
-            # Also publish visualization position
-            viz_msg = Float64()
-            viz_msg.data = 0.0
-            self.gripper_viz_pub.publish(viz_msg)
-            
             if result.returncode == 0:
                 return True, "Gripper opened successfully"
             else:
@@ -353,12 +353,18 @@ class ROSProgramController:
         """Send close gripper command via ROS 2 action."""
         if not ROS_AVAILABLE:
             return False, "ROS not available"
-        
+
+        # Publish visualization position (drives gripper_joint_state_publisher in sim)
+        viz_msg = Float64()
+        viz_msg.data = 1.0  # Fully closed (gripper_joint_state_publisher maps 1.0 -> 0.8 rad)
+        self.gripper_viz_pub.publish(viz_msg)
+
+        # In fake/sim mode the viz topic is all that's needed — no action server exists
+        if self.use_fake:
+            return True, "Gripper closed (sim)"
+
         try:
-            # Use subprocess to call ros2 action send_goal (proven to work)
             import subprocess
-            
-            # Close = position 0.0m (fully closed)
             cmd = (
                 'source /opt/ros/humble/setup.bash && '
                 'source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && '
@@ -366,7 +372,6 @@ class ROSProgramController:
                 'robotiq_2f_urcap_adapter/action/GripperCommand '
                 "'{command: {position: 0.0, max_effort: 255.0, max_speed: 0.1}}'"
             )
-            
             result = subprocess.run(
                 cmd,
                 shell=True,
@@ -375,12 +380,6 @@ class ROSProgramController:
                 timeout=15,
                 executable='/bin/bash'
             )
-            
-            # Also publish visualization position
-            viz_msg = Float64()
-            viz_msg.data = 0.8  # Nearly closed
-            self.gripper_viz_pub.publish(viz_msg)
-            
             if result.returncode == 0:
                 return True, "Gripper closed successfully"
             else:
@@ -394,14 +393,21 @@ class ROSProgramController:
         """Set gripper to specific position (0.0 = open, 1.0 = closed)."""
         if not ROS_AVAILABLE:
             return False, "ROS not available"
-        
+
+        position = max(0.0, min(1.0, position))
+
+        # Publish visualization position (drives gripper_joint_state_publisher in sim)
+        viz_msg = Float64()
+        viz_msg.data = position  # gripper_joint_state_publisher maps [0,1] -> [0, 0.8 rad]
+        self.gripper_viz_pub.publish(viz_msg)
+
+        # In fake/sim mode the viz topic is all that's needed — no action server exists
+        if self.use_fake:
+            return True, f"Gripper position set to {position:.2f} (sim)"
+
         try:
-            # Clamp position to valid range
-            position = max(0.0, min(1.0, position))
-            
             # Convert: 0 (open) -> 0.085m, 1 (closed) -> 0.0m
             robotiq_position = (1.0 - position) * 0.085
-            
             import subprocess
             cmd = (
                 'source /opt/ros/humble/setup.bash && '
@@ -410,7 +416,6 @@ class ROSProgramController:
                 'robotiq_2f_urcap_adapter/action/GripperCommand '
                 f"'{{command: {{position: {robotiq_position}, max_effort: 100.0, max_speed: 0.1}}}}'"
             )
-            
             result = subprocess.run(
                 cmd,
                 shell=True,
@@ -419,12 +424,6 @@ class ROSProgramController:
                 timeout=15,
                 executable='/bin/bash'
             )
-            
-            # Also publish visualization position
-            viz_msg = Float64()
-            viz_msg.data = position * 0.8  # Scale to gripper range
-            self.gripper_viz_pub.publish(viz_msg)
-            
             if result.returncode == 0:
                 return True, f"Gripper position set to {position:.2f}"
             else:

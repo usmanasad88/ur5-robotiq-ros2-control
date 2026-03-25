@@ -1,0 +1,16 @@
+# Test moverelative
+set_speed(0.5)
+
+# Nudge up from current
+moverelative(up, 0.05)
+wait(0.5)
+
+# Nudge back from current using vector
+moverelative([-1, 0, 0], 0.05)
+wait(0.5)
+
+# Move relatively from Home
+# It should move the arm to Home + 10cm up
+moverelative(Home, up, 0.1)
+wait(0.5)
+
