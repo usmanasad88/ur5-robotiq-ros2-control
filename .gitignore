@@ -43,3 +43,4 @@ Thumbs.db
 
 # Nested git repositories (use as reference or clone separately)
 src/Universal_Robots_ROS2_Driver/
+isaac_standalone/Objects/Lab2.usdz
