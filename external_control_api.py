@@ -250,12 +250,11 @@ class ROSBridge:
 
         # Drive the physical gripper through the Robotiq action server
         cmd = (
-            'unset LD_PRELOAD && '
             'source /opt/ros/humble/setup.bash && '
             'source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && '
             'ros2 action send_goal -f /robotiq_2f_urcap_adapter/gripper_command '
             'robotiq_2f_urcap_adapter/action/GripperCommand '
-            f"'{{command: {{position: {robotiq_pos}, max_effort: 255.0, max_speed: 0.1}}}}'"
+            f"'{{command: {{position: {robotiq_pos}, max_effort: 100.0, max_speed: 0.1}}}}'"
         )
 
         try:

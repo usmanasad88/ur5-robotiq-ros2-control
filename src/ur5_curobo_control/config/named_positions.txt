@@ -56,4 +56,10 @@ joint table_near_corner -55 -25.75 88.17 142.96 -71.27 -13.42
 # ============================================
 # Custom Positions (add your own below)
 # ============================================
-# Saved at 2026-03-20 02:26:48
+joint Pick_Punch -26 -16 19 68 90 5
+joint Pick_White_Ball -33 -13 13 76 99 5
+joint Pick_Tape -17 -15 16 88 92 5
+joint Pick_Rainbow_Ball -2 -22 30 59 91 5
+joint Pick_Orange_Ball -5 -27 45 73 100 5
+joint Drop_Position_Basket 21 -41 41 62 91 5
+

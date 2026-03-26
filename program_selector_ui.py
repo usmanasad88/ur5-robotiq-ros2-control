@@ -330,7 +330,7 @@ class ROSProgramController:
                 'source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && '
                 'ros2 action send_goal -f /robotiq_2f_urcap_adapter/gripper_command '
                 'robotiq_2f_urcap_adapter/action/GripperCommand '
-                "'{command: {position: 0.085, max_effort: 255.0, max_speed: 0.1}}'"
+                "'{command: {position: 0.085, max_effort: 100.0, max_speed: 0.1}}'"
             )
             result = subprocess.run(
                 cmd,
@@ -370,7 +370,7 @@ class ROSProgramController:
                 'source /home/rml/ur5-robotiq-ros2-control/install/setup.bash && '
                 'ros2 action send_goal -f /robotiq_2f_urcap_adapter/gripper_command '
                 'robotiq_2f_urcap_adapter/action/GripperCommand '
-                "'{command: {position: 0.0, max_effort: 255.0, max_speed: 0.1}}'"
+                "'{command: {position: 0.0, max_effort: 100.0, max_speed: 0.1}}'"
             )
             result = subprocess.run(
                 cmd,
