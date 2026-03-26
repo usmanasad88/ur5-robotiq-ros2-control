@@ -1584,41 +1584,77 @@ class UR5ProgramExecutorNode(Node):
             return False
     
     def execute_move_to_pose(self, instruction: RobotInstruction) -> bool:
-        """Execute a move to pose instruction using cuRobo."""
+        """Execute a move to pose instruction using cuRobo.
+
+        Solves IK seeded at the current joint state (to stay near the current
+        configuration) and then either:
+        - Real hardware: sends a single-waypoint joint trajectory and lets the
+          UR controller interpolate smoothly (same as execute_move_to_joint).
+        - Fake/sim hardware: uses cuRobo plan_single_js for a collision-free
+          multi-waypoint trajectory.
+        """
         if instruction.pose is None:
             return False
-        
+
         target_pos, target_quat = instruction.pose
-        
+
         # Create cuRobo Pose (expects quaternion as [w, x, y, z])
         target_pose = CuroboPose(
             position=torch.tensor(target_pos, device=self.tensor_args.device, dtype=self.tensor_args.dtype),
             quaternion=torch.tensor(target_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
         )
-        
-        # Create Start State
-        start_state = CuroboJointState.from_position(self.current_joint_state.view(1, -1))
-        
-        # Plan motion
-        result = self.motion_gen.plan_single(
-            start_state, target_pose,
-            MotionGenPlanConfig(enable_graph=False, timeout=2.0)
+
+        # Solve IK seeded at current joints to stay near current configuration
+        current_q = self.current_joint_state.view(1, -1)
+        ik_result = self.motion_gen.solve_ik(
+            target_pose,
+            retract_config=current_q,
+            seed_config=current_q.unsqueeze(0),  # shape (1, 1, dof)
+            return_seeds=1,
         )
-        
-        if result.success.item():
-            self.get_logger().info("Motion plan successful, executing...")
-            traj = result.interpolated_plan
-            self.publish_trajectory(traj)
-            
-            # Wait for trajectory to complete, but allow interruption by stop/pause
-            traj_duration = self.estimate_trajectory_duration(traj)
-            if self._stop_event.wait(timeout=traj_duration + 0.5):
-                self.get_logger().info("Motion interrupted by stop/pause")
-                return False
-            return True
-        else:
-            self.get_logger().error(f"Motion planning failed: {result.status}")
+
+        if not ik_result.success.item():
+            self.get_logger().error(
+                f"IK failed for pose pos={target_pos} quat={target_quat}"
+            )
             return False
+
+        goal_joints = ik_result.solution.squeeze().cpu().numpy().tolist()
+
+        if not self.use_fake_hardware:
+            # Real hardware: single-waypoint trajectory for smooth UR interpolation
+            self.get_logger().info("movetopose (IK -> single waypoint): executing...")
+            synth = RobotInstruction(
+                type=InstructionType.MOVE_TO_JOINT,
+                line_number=instruction.line_number,
+                raw_line=f"movetopose -> movetojoint via IK",
+                joint_positions=goal_joints
+            )
+            return self.execute_move_to_joint(synth)
+        else:
+            # Sim/fake: cuRobo joint-space plan for collision-free trajectory
+            self.get_logger().info("movetopose (IK -> JS plan): planning...")
+            start_state = CuroboJointState.from_position(current_q)
+            goal_state = CuroboJointState.from_position(ik_result.solution.view(1, -1))
+
+            result = self.motion_gen.plan_single_js(
+                start_state, goal_state,
+                MotionGenPlanConfig(enable_graph=False, timeout=2.0)
+            )
+
+            if result.success.item():
+                self.get_logger().info("JS motion plan successful, executing...")
+                traj = result.get_interpolated_plan()
+                self.publish_trajectory(traj)
+
+                traj_duration = self.estimate_trajectory_duration(traj)
+                if self._stop_event.wait(timeout=traj_duration + 0.5):
+                    self.get_logger().info("Motion interrupted by stop/pause")
+                    return False
+                return True
+            else:
+                self.get_logger().error(f"JS motion planning failed: {result.status}")
+                return False
     
     def execute_move_to_joint(self, instruction: RobotInstruction) -> bool:
         """Execute a move to joint position.
@@ -2018,8 +2054,14 @@ class UR5ProgramExecutorNode(Node):
     def execute_move_relative_instruction(self, instruction: RobotInstruction) -> bool:
         """Execute a relative Cartesian move from a program instruction.
 
-        If force mode is active, it is temporarily suspended for the trajectory
-        move and then re-activated with the same parameters afterwards.
+        For moves from the current position on real hardware: uses URScript
+        movel for smooth linear motion (avoids cuRobo jitter).
+
+        For moves from a named reference position, or on fake/simulated
+        hardware: uses cuRobo planning.
+
+        If force mode is active, it is temporarily suspended for cuRobo
+        trajectory moves and then re-activated afterwards.
         """
         if instruction.relative_move is None:
             return False
@@ -2044,6 +2086,23 @@ class UR5ProgramExecutorNode(Node):
             direction_vec = direction_map[direction_or_vector]
             direction_name = direction_or_vector
 
+        # --- Real hardware + current position: use movel for smooth motion ---
+        if ref_pos_name == "current" and not self.use_fake_hardware:
+            self.get_logger().info(
+                f"moverelative (movel): {direction_name} {distance:.3f}m from current"
+            )
+            synth = RobotInstruction(
+                type=InstructionType.MOVEL,
+                line_number=instruction.line_number,
+                raw_line=f"moverelative({direction_name}, {distance}) -> movel",
+                movel_direction=direction_vec,
+                movel_distance=distance,
+                movel_speed=self.speed_factor * 0.25,
+                movel_accel=0.5
+            )
+            return self.execute_movel(synth)
+
+        # --- Fake hardware or named-reference moves: use cuRobo planning ---
         offset = [d * distance for d in direction_vec]
 
         # If force mode is active, suspend it for the trajectory move
@@ -2058,7 +2117,7 @@ class UR5ProgramExecutorNode(Node):
 
         try:
             start_state = CuroboJointState.from_position(self.current_joint_state.view(1, -1))
-            
+
             # Determine reference pose
             if ref_pos_name == "current":
                 kin_state = self.motion_gen.kinematics.get_state(self.current_joint_state.view(1, -1))
@@ -2070,12 +2129,12 @@ class UR5ProgramExecutorNode(Node):
                 if self.named_positions is None:
                     self.get_logger().error(f"moverelative: failed to load named positions")
                     return False
-                    
+
                 pos = self.named_positions.get(ref_pos_name.lower())
                 if pos is None:
                     self.get_logger().error(f"moverelative: reference position '{ref_pos_name}' not found")
                     return False
-                
+
                 if pos.position_type == PositionType.POSE:
                     base_pos = pos.position
                     base_quat = pos.quaternion
@@ -2101,22 +2160,38 @@ class UR5ProgramExecutorNode(Node):
                 quaternion=torch.tensor(base_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
             )
 
-            result = self.motion_gen.plan_single(
-                start_state, target_pose,
-                MotionGenPlanConfig(enable_graph=False, timeout=5.0)
+            # Solve IK seeded at current joints to stay near the current
+            # configuration, then plan in joint-space. This avoids the
+            # Cartesian planner jumping to a distant IK solution.
+            current_q = self.current_joint_state.view(1, -1)
+            ik_result = self.motion_gen.solve_ik(
+                target_pose,
+                retract_config=current_q,
+                seed_config=current_q.unsqueeze(0),  # shape (1, 1, dof)
+                return_seeds=1,
             )
 
-            if result.success.item():
-                traj = result.get_interpolated_plan()
-                self.publish_trajectory(traj)
-                traj_duration = self.estimate_trajectory_duration(traj)
-                if self._stop_event.wait(timeout=traj_duration + 0.5):
-                    self.get_logger().info("Relative move interrupted by stop/pause")
-                    return False
-                move_ok = True
-            else:
-                self.get_logger().error(f"Relative move planning failed: {result.status}")
+            if not ik_result.success.item():
+                self.get_logger().error(f"Relative move IK failed for target {target_pos}")
                 move_ok = False
+            else:
+                goal_state = CuroboJointState.from_position(ik_result.solution.view(1, -1))
+                result = self.motion_gen.plan_single_js(
+                    start_state, goal_state,
+                    MotionGenPlanConfig(enable_graph=False, timeout=5.0)
+                )
+
+                if result.success.item():
+                    traj = result.get_interpolated_plan()
+                    self.publish_trajectory(traj)
+                    traj_duration = self.estimate_trajectory_duration(traj)
+                    if self._stop_event.wait(timeout=traj_duration + 0.5):
+                        self.get_logger().info("Relative move interrupted by stop/pause")
+                        return False
+                    move_ok = True
+                else:
+                    self.get_logger().error(f"Relative move JS planning failed: {result.status}")
+                    move_ok = False
 
             # Re-enter force mode if it was active before the move
             if was_in_force_mode and saved_force_instruction and move_ok:
