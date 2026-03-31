@@ -38,7 +38,7 @@ source /opt/ros/humble/setup.bash
 source "$WORKSPACE/install/setup.bash"
 
 # Default robot IP
-ROBOT_IP="${1:-172.17.66.105}"
+ROBOT_IP="${1:-192.168.0.105}"
 
 echo "Launching Robotiq 2F-85 Gripper Adapter..."
 echo "Robot IP: $ROBOT_IP"

@@ -57,6 +57,5 @@ wait(0.5)
 # Phase 4: Return Home
 # -----------------------------------------
 movetonamed(Home)
-wait(0.5)
 
 # Program complete!

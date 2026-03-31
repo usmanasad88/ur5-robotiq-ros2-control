@@ -35,13 +35,14 @@ joint table_surface_center 42.88 -30.42 47.35 254.62 -84.46 0
 
 #Resin Storage
 joint Bottle_Resin_Storage -64 -38 75 -33.5 116.5 0
+joint Above_Bottle_Resin_Storage -64 -50 67.56 -15 116.5 0 
 
 #Hardener Storage
 joint Bottle_Hardener_Storage -56.5 -29 56.85 -26 123 0
 
 #Resin Workspace
-joint Bottle_Resin_Workspace 46.2 -12.34 51.65 137.28 -127.07 0
-
+joint Bottle_Resin_Workspace 34 -51.5 99.5 -44.9 122 0
+joint Above_Bottle_Resin_Workspace 34 -64.9 92.8 -24.7 122 0
 #Hardener
 joint Bottle_Hardener_Workspace 14.08 -29.34 99.55 105.55 -100.59 0
 

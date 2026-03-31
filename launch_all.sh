@@ -59,14 +59,14 @@ tmux kill-session -t "$SESSION" 2>/dev/null
 
 # ---- Create session + windows ------------------------------------------
 
-# Window 1: UR5 driver
+# Window 1: UR5 driver - IP: 172.17.66.105 OR 192.168.0.105 ; Host IP: 172.17.66.133 OR 192.168.0.38
 tmux new-session -d -s "$SESSION" -n "UR5-Driver" \
-    "echo '[UR5 Driver] Starting...'; \"$SCRIPT_DIR/launch_ur5_robotiq.sh\" 172.17.66.105 $USE_FAKE; exec bash"
+    "echo '[UR5 Driver] Starting...'; \"$SCRIPT_DIR/launch_ur5_robotiq.sh\" 192.168.0.105 $USE_FAKE; exec bash"
 
 # Window 2 (real only): Robotiq gripper adapter
 if [ "$USE_FAKE" = "false" ]; then
     tmux new-window -t "$SESSION" -n "Gripper" \
-        "echo '[Gripper] Waiting 8s for UR5 driver...'; sleep 8; echo '[Gripper] Starting Robotiq adapter...'; \"$SCRIPT_DIR/run_gripper.sh\" 172.17.66.105; exec bash"
+        "echo '[Gripper] Waiting 8s for UR5 driver...'; sleep 8; echo '[Gripper] Starting Robotiq adapter...'; \"$SCRIPT_DIR/run_gripper.sh\" 192.168.0.105; exec bash"
 fi
 
 # Window: cuRobo motion planner
