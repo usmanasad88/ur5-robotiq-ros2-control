@@ -145,6 +145,19 @@ echo "[setup] Fixed intra-package imports."
 # ---------------------------------------------------------------------------
 # Register the module in extension.toml (idempotent)
 # ---------------------------------------------------------------------------
+# How extension registration works:
+#   Isaac Sim discovers extensions via extension.toml in each ext package.
+#   Each [[python.module]] block names a Python module to import at startup.
+#   We add our module ("isaacsim.examples.interactive.ur_robotiq_cortex")
+#   so Kit auto-imports it, which triggers __init__.py → URRobotiqCortexExtension.
+#
+#   To add a NEW extension to Isaac Sim the same way:
+#     1. Create a package folder under <interactive_ext>/isaacsim/examples/interactive/<name>/
+#     2. Add a [[python.module]] entry here:  name = "isaacsim.examples.interactive.<name>"
+#     3. Ensure __init__.py imports the IExt subclass so Kit picks it up.
+#
+#   To REMOVE an extension: delete its [[python.module]] block from extension.toml
+#   and remove its folder. Leaving a dangling entry causes a startup import error.
 MODULE_NAME="isaacsim.examples.interactive.ur_robotiq_cortex"
 
 if grep -qF "${MODULE_NAME}" "${TOML}"; then

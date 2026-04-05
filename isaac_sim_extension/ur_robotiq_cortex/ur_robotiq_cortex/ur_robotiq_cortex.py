@@ -44,7 +44,7 @@ def _get_ur_ws_root() -> Path:
 
 UR5_USD_RELATIVE  = "isaac_standalone/Collected_ur10e_robotiq2f-140_ROS/ur5_robotiq2f-85.usd"
 UR10_USD_RELATIVE = "isaac_standalone/Collected_ur10e_robotiq2f-140_ROS/ur10e_robotiq2f-140_ROS.usd"
-ENABLE_OBJECT_COLLISIONS = False
+ENABLE_OBJECT_COLLISIONS = True
 
 # ---------------------------------------------------------------------------
 
@@ -234,18 +234,21 @@ class URRobotiqCortex(CortexBase):
 
         # Object specifications from Scene_update_locations1.usda
         objects = [
-            ("box.glb", "box", [0.3020465481322483, -0.7993800354369227, -0.05261620751702961], [0.3, 0.3, 0.3], [0.67167205, 0, 0, 0.7408486]),
-            ("bottle.glb", "bottle", [0.62185, -0.74392, -0.03925], [0.18, 0.18, 0.18], [0.89517987, 0, 0, -0.44570506]),
-            ("mold.glb", "mold", [1.0001067678586937, -0.4725607098919987, -0.1062191284941244], [0.2, 0.2, 0.2], [0.89517987, 0, 0, -0.44570506]),
-            ("chair.glb", "chair", [1.4380247015837357, -0.3976784166109164, -0.4433299999999997], [0.6, 0.6, 0.6], [0.6846738, 0, 0, -0.72884965]),
-            ("table.glb", "table", [0.9180239448935501, -0.10213723964001309, -0.43615574066459784], [1.12, 1.12, 1.12], [0.70710677, 0, 0, -0.70710677]),
-            ("roller.glb", "roller", [0.2912099012344287, -0.6610178444917744, 0.010067407600128253], [0.2, 0.2, 0.2], [0.9907924, -0.13035351, 0.028021853, 0.023519594]),
-            ("scale.usd", "scale", [0.9887047587647333, -0.21432947434265026, -0.11687290658911437], [0.2, 0.2, 0.2], [0.89517987, 0, 0, -0.44570506]),
-            ("table.glb", "table_01", [0.2069019081973329, -0.9348596743844684, -0.43615999999997934], [1.12, 1.12, 1.12], [6.123234e-17, 0, 0, 1]),
-            ("bottle.glb", "bottle_01", [0.48591, -0.7444, -0.03805], [0.18, 0.18, 0.18], [0.87884057, 0, 0, -0.47711557]),
-            ("chair.glb", "chair_01", [1.4670980932575624, 0.05057512260420771, -0.4433302652111933], [0.6, 0.6, 0.6], [0.6846738, 0, 0, -0.72884965]),
-            ("chair.glb", "chair_02", [0.4122172010525239, -1.2876057483987595, -0.44332999999999984], [0.6, 0.6, 0.6], [0.021866286, 0, 0, -0.9997609]),
-            ("chair.glb", "chair_03", [-0.03659228338588363, -1.3062214460872272, -0.44332999999999984], [0.6, 0.6, 0.6], [0.021866286, 0, 0, -0.9997609]),
+            ("box.glb", "box", [0.020250664143844695, -0.799380035436923, -0.003023436160052201], [0.3, 0.3, 0.3], [0.67167205, 0, 0, 0.7408486]),
+            ("bottle.glb", "bottle", [0.5883761388085353, 0.3891037747941267, -0.0015232706561414185], [0.15, 0.15, 0.15], [0.89517987, 0, 0, -0.44570506]),
+            ("mold.glb", "mold", [0.9947561783427199, 0.03842857747566735, -0.03418280632764703], [0.2, 0.2, 0.2], [6.123234e-17, 1, 0, 0]),
+            ("chair.glb", "chair", [2.654924188733815, -0.7996137486341647, -0.4433299999999999], [0.6, 0.6, 0.6], [0.6846738, 0, 0, -0.72884965]),
+            ("table.glb", "table", [0.8149888776624827, -0.04560571909652668, -0.41187710630742197], [1.22, 1.22, 1.22], [0.70710677, 0, 0, -0.70710677]),
+            ("roller.glb", "roller", [0.009414017246025964, -0.6610178444917778, 0.07770526356954245], [0.2, 0.2, 0.2], [0.9907924, -0.13035351, 0.028021853, 0.023519594]),
+            ("scale.usd", "scale", [0.9796966110997245, 0.47066618528330484, -0.050753143391285616], [0.2, 0.2, 0.2], [0.70710677, 0, 0, 0.70710677]),
+            ("table.glb", "table_01", [-0.005166622984513063, -0.9581998617755373, -0.41188], [1.22, 1.22, 1.22], [6.123234e-17, 0, 0, 1]),
+            ("bottle.glb", "bottle_01", [0.37399906533516813, -0.7416339292944675, -0.006991196782229553], [0.15, 0.15, 0.15], [0.87884057, 0, 0, -0.47711557]),
+            ("chair.glb", "chair_01", [1.5211308724811525, 0.11280207853649299, -0.4129617690059313], [0.7, 0.7, 0.7], [0.6846738, 0, 0, -0.72884965]),
+            ("chair.glb", "chair_02", [0.5518825573150291, -1.4596548944824432, -0.44333000000000217], [0.7, 0.7, 0.7], [0.021866286, 0, 0, -0.9997609]),
+            ("chair.glb", "chair_03", [-0.030057869207804636, -1.4888103302584828, -0.44332999999999656], [0.7, 0.7, 0.7], [0.021866286, 0, 0, -0.9997609]),
+            ("human.usd", "human", [1.55496987436995, 0.08527604402904952, -0.14375425001112657], [1, 1, 1], [0.96886265, 0, 0, 0.24759878],
+             {"xformOp:rotateX:unitsResolve": (Sdf.ValueTypeNames.Double, 90.0),
+              "xformOp:scale:unitsResolve": (Sdf.ValueTypeNames.Double3, Gf.Vec3d(0.75, 0.75, 0.75))}),
         ]
 
         def add_sdf_collision(prim_path):
@@ -275,13 +278,29 @@ class URRobotiqCortex(CortexBase):
             approx_attr.Set("sdf")
             LOGGER(f"Applied SDF collision APIs to {inner_path}")
 
-        for obj_file, obj_name, position, scale, orientation in objects:
+        for obj_entry in objects:
+            obj_file, obj_name, position, scale, orientation = obj_entry[:5]
+            extra_xforms = obj_entry[5] if len(obj_entry) > 5 else None
             try:
                 obj_path = str(ur_ws / f"isaac_standalone/Objects/{obj_file}")
                 if os.path.exists(obj_path):
                     prim_path = f"/World/Objects/{obj_name}"
                     add_reference_to_stage(usd_path=obj_path, prim_path=prim_path)
                     set_prim_transform(prim_path, position, scale, orientation)
+                    if extra_xforms:
+                        prim = stage.GetPrimAtPath(prim_path)
+                        if prim.IsValid():
+                            for attr_name, (type_name, value) in extra_xforms.items():
+                                attr = prim.GetAttribute(attr_name)
+                                if not attr.IsValid():
+                                    attr = prim.CreateAttribute(attr_name, type_name)
+                                attr.Set(value)
+                            # Rebuild xformOpOrder to include extras
+                            base_ops = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                            order_attr = prim.GetAttribute("xformOpOrder")
+                            if not order_attr.IsValid():
+                                order_attr = prim.CreateAttribute("xformOpOrder", Sdf.ValueTypeNames.TokenArray, True)
+                            order_attr.Set(base_ops + list(extra_xforms.keys()))
                     if ENABLE_OBJECT_COLLISIONS:
                         add_sdf_collision(prim_path)
                     LOGGER(f"Loaded {obj_name}")

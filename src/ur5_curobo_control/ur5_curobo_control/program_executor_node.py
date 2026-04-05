@@ -218,6 +218,7 @@ class UR5ProgramExecutorNode(Node):
         self._teleop_replan_timer = None
         self._teleop_sub = None
         self._teleop_lock = threading.Lock()
+        self._execution_step_lock = threading.Lock()
         # Latest raw axis values from spacemouse, each in [-1, 1]; None = at rest
         self._teleop_axis: Optional[PoseDelta] = None
 
@@ -648,11 +649,17 @@ class UR5ProgramExecutorNode(Node):
 
     def _setup_subscribers(self):
         """Set up ROS subscribers."""
+        # Use the ReentrantCallbackGroup so joint states keep updating even
+        # while execution_step (in the default MutuallyExclusiveCallbackGroup)
+        # is blocked inside a move/wait.  Without this, current_joint_state
+        # goes stale during program execution, causing stop_robot() to send the
+        # robot back to a pre-execution position on program completion.
         self.joint_state_sub = self.create_subscription(
             JointState,
             '/joint_states',
             self.joint_state_callback,
-            10
+            10,
+            callback_group=self.callback_group
         )
         
         self.safety_sub = self.create_subscription(
@@ -1478,10 +1485,23 @@ class UR5ProgramExecutorNode(Node):
 
     def execution_step(self):
         """Execute the next instruction in the program.
-        
+
         Handles conditional blocks (if/else/endif) by evaluating conditions
         and skipping instructions in false branches.
+
+        Uses a lock to prevent concurrent entry from the MultiThreadedExecutor
+        — blocking instructions (move, wait) can take seconds, during which
+        the 0.1s timer would fire additional overlapping calls.
         """
+        if not self._execution_step_lock.acquire(blocking=False):
+            return  # another execution_step is already running
+        try:
+            self._execution_step_locked()
+        finally:
+            self._execution_step_lock.release()
+
+    def _execution_step_locked(self):
+        """Inner execution step, called with _execution_step_lock held."""
         if self.state != ExecutorState.EXECUTING:
             return
         
@@ -2102,7 +2122,7 @@ class UR5ProgramExecutorNode(Node):
             )
             return self.execute_movel(synth)
 
-        # --- Fake hardware or named-reference moves: use cuRobo planning ---
+        # --- Named-reference or sim moves: IK solve + single-waypoint trajectory ---
         offset = [d * distance for d in direction_vec]
 
         # If force mode is active, suspend it for the trajectory move
@@ -2116,9 +2136,12 @@ class UR5ProgramExecutorNode(Node):
             time.sleep(0.3)
 
         try:
-            start_state = CuroboJointState.from_position(self.current_joint_state.view(1, -1))
-
-            # Determine reference pose
+            # Determine reference pose and IK seed configuration.
+            # When moving relative to a named joint position, we seed the IK
+            # solver with the reference position's joints so the solution has
+            # a similar joint configuration — avoiding large configuration
+            # jumps when subsequently moving to the named position itself.
+            ref_joint_q = None  # set when reference is a joint position
             if ref_pos_name == "current":
                 kin_state = self.motion_gen.kinematics.get_state(self.current_joint_state.view(1, -1))
                 base_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
@@ -2139,8 +2162,8 @@ class UR5ProgramExecutorNode(Node):
                     base_pos = pos.position
                     base_quat = pos.quaternion
                 elif pos.position_type == PositionType.JOINT:
-                    joint_tensor = torch.tensor(pos.joint_positions, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
-                    kin_state = self.motion_gen.kinematics.get_state(joint_tensor.view(1, -1))
+                    ref_joint_q = torch.tensor(pos.joint_positions, device=self.tensor_args.device, dtype=self.tensor_args.dtype).view(1, -1)
+                    kin_state = self.motion_gen.kinematics.get_state(ref_joint_q)
                     base_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
                     base_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
                 else:
@@ -2160,14 +2183,14 @@ class UR5ProgramExecutorNode(Node):
                 quaternion=torch.tensor(base_quat, device=self.tensor_args.device, dtype=self.tensor_args.dtype)
             )
 
-            # Solve IK seeded at current joints to stay near the current
-            # configuration, then plan in joint-space. This avoids the
-            # Cartesian planner jumping to a distant IK solution.
-            current_q = self.current_joint_state.view(1, -1)
+            # Seed IK with the reference position's joints (if available) so
+            # the solution stays in a similar configuration. Fall back to
+            # current joints for "current" or pose-type references.
+            seed_q = ref_joint_q if ref_joint_q is not None else self.current_joint_state.view(1, -1)
             ik_result = self.motion_gen.solve_ik(
                 target_pose,
-                retract_config=current_q,
-                seed_config=current_q.unsqueeze(0),  # shape (1, 1, dof)
+                retract_config=seed_q,
+                seed_config=seed_q.unsqueeze(0),  # shape (1, 1, dof)
                 return_seeds=1,
             )
 
@@ -2175,23 +2198,24 @@ class UR5ProgramExecutorNode(Node):
                 self.get_logger().error(f"Relative move IK failed for target {target_pos}")
                 move_ok = False
             else:
-                goal_state = CuroboJointState.from_position(ik_result.solution.view(1, -1))
-                result = self.motion_gen.plan_single_js(
-                    start_state, goal_state,
-                    MotionGenPlanConfig(enable_graph=False, timeout=5.0)
+                goal_joints = ik_result.solution.squeeze().cpu().numpy().tolist()
+                current_joints = self.current_joint_state.cpu().numpy().tolist()
+                self.get_logger().info(
+                    f"moverelative IK solved — current joints: "
+                    f"[{', '.join(f'{j:.3f}' for j in current_joints)}], "
+                    f"goal joints: [{', '.join(f'{j:.3f}' for j in goal_joints)}]"
                 )
 
-                if result.success.item():
-                    traj = result.get_interpolated_plan()
-                    self.publish_trajectory(traj)
-                    traj_duration = self.estimate_trajectory_duration(traj)
-                    if self._stop_event.wait(timeout=traj_duration + 0.5):
-                        self.get_logger().info("Relative move interrupted by stop/pause")
-                        return False
-                    move_ok = True
-                else:
-                    self.get_logger().error(f"Relative move JS planning failed: {result.status}")
-                    move_ok = False
+                # Single-waypoint trajectory — let the controller interpolate
+                # smoothly instead of using cuRobo multi-waypoint trajectories
+                # which can cause jumps or configuration changes.
+                synth = RobotInstruction(
+                    type=InstructionType.MOVE_TO_JOINT,
+                    line_number=instruction.line_number,
+                    raw_line=f"moverelative({ref_pos_name}, {direction_name}, {distance}) -> movetojoint",
+                    joint_positions=goal_joints
+                )
+                move_ok = self.execute_move_to_joint(synth)
 
             # Re-enter force mode if it was active before the move
             if was_in_force_mode and saved_force_instruction and move_ok:

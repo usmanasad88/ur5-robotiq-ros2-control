@@ -1,62 +1,79 @@
 # ============================================
-# Move Hardener from Storage to Workplace - Robot Program
-# ============================================
-# This program picks up the hardener bottle from storage
-# and moves it to the workpiece position using named
-# joint positions.
+# Move Hardener from Storage to Workplace
 # ============================================
 
-# Set a moderate speed for safe operation
 set_speed(0.5)
 
 # -----------------------------------------
-# Phase 1: Move to Home Position
+# Phase 1: Ensure we start from Home
 # -----------------------------------------
-# Skip if already at Home
-if near(Home)
-  wait(0.1)
-else
+if not_near(Home, 0.15)
   movetonamed(Home)
   wait(1.0)
 endif
 
-# Ensure gripper is open before approaching bottle
-if gripper_open
-  wait(0.1)
-else
+# -----------------------------------------
+# Phase 2: Ensure gripper is open
+# -----------------------------------------
+if gripper_closed
   opengripper
   wait(0.5)
 endif
 
 # -----------------------------------------
-# Phase 2: Pick Bottle from Storage
+# Phase 3: Move to hardener bottle storage (source)
 # -----------------------------------------
-movetonamed(Above_Bottle_Hardener_Storage)
+moverelative(Bottle_Hardener_Storage, up, 0.15)
 wait(0.5)
+
 movetonamed(Bottle_Hardener_Storage)
 wait(0.3)
+
+# -----------------------------------------
+# Phase 4: Grasp the bottle
+# -----------------------------------------
 closegripper
 wait(1.0)
-movetonamed(Above_Bottle_Hardener_Storage)
+
+# -----------------------------------------
+# Phase 5: Lift up and return home via named positions
+# -----------------------------------------
+moverelative(Bottle_Hardener_Storage, up, 0.15)
+wait(0.5)
+
+set_speed(0.3)
+
+
 movetonamed(Home)
 wait(0.5)
 
+set_speed(0.5)
+
 # -----------------------------------------
-# Phase 3: Move to Workplace and Place Bottle
+# Phase 6: Move to workspace position (target)
 # -----------------------------------------
-movetonamed(Above_Bottle_Hardener_Workspace)
+moverelative(Bottle_Hardener_Workspace, up, 0.15)
 wait(0.5)
+
 movetonamed(Bottle_Hardener_Workspace)
 wait(0.3)
+
+# -----------------------------------------
+# Phase 7: Release bottle
+# -----------------------------------------
 opengripper
-wait(0.5)
-movetonamed(Above_Bottle_Hardener_Workspace)
 wait(0.5)
 
 # -----------------------------------------
-# Phase 4: Return Home
+# Phase 8: Small retreat using relative motion
+# -----------------------------------------
+moverelative(Bottle_Hardener_Workspace, up, 0.15)
+wait(0.3)
+
+set_speed(0.3)
+
+# -----------------------------------------
+# Phase 9: Return home
 # -----------------------------------------
 movetonamed(Home)
 wait(0.5)
-
-# Program complete!

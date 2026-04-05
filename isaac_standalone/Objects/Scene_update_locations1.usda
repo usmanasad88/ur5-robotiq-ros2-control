@@ -7,8 +7,8 @@
                 double radius = 5
             }
             dictionary Perspective = {
-                double3 position = (1.8556673344631165, -2.125644136326575, 0.6685111179438139)
-                double3 target = (0.1595927634728871, 0.7762196353464361, -0.3184369456308279)
+                double3 position = (1.4248605500063927, -0.9429710257163373, 0.8133056416703044)
+                double3 target = (-0.5750844767662273, 8.089029200117492, -5.402412010256157)
             }
             dictionary Right = {
                 double3 position = (0, -5, 0)
@@ -198,6 +198,7 @@ def "World"
             {
                 over "shoulder_pan_joint"
                 {
+                    float drive:angular:physics:maxForce = 150.1
                     float drive:angular:physics:targetPosition = 0
                     float state:angular:physics:position = 0
                     float state:angular:physics:velocity = 0
@@ -205,24 +206,28 @@ def "World"
 
                 over "shoulder_lift_joint"
                 {
+                    float drive:angular:physics:targetPosition = 0
                     float state:angular:physics:position = 0
                     float state:angular:physics:velocity = 0
                 }
 
                 over "elbow_joint"
                 {
+                    float drive:angular:physics:targetPosition = 0
                     float state:angular:physics:position = 0
                     float state:angular:physics:velocity = 0
                 }
 
                 over "wrist_1_joint"
                 {
+                    float drive:angular:physics:targetPosition = 0
                     float state:angular:physics:position = 0
                     float state:angular:physics:velocity = 0
                 }
 
                 over "wrist_2_joint"
                 {
+                    float drive:angular:physics:targetPosition = 0
                     float state:angular:physics:position = 0
                     float state:angular:physics:velocity = 0
                 }
@@ -379,7 +384,7 @@ def "World"
             quatf xformOp:orient = (0.67167205, 0, 0, 0.7408486)
             double xformOp:rotateX:unitsResolve = 90
             float3 xformOp:scale = (0.3, 0.3, 0.3)
-            double3 xformOp:translate = (0.3020465481322487, -0.7993800354369235, -0.00541686078202686)
+            double3 xformOp:translate = (0.020250664143844695, -0.799380035436923, -0.003023436160052201)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:rotateX:unitsResolve"]
 
             over "geometry_0"
@@ -401,16 +406,20 @@ def "World"
             quatf xformOp:orient = (0.89517987, 0, 0, -0.44570506)
             double xformOp:rotateX:unitsResolve = 90
             float3 xformOp:scale = (0.15, 0.15, 0.15)
-            double3 xformOp:translate = (0.8961337911621796, 0.36499084425737904, -0.011131346483083643)
+            double3 xformOp:translate = (0.5883761388085353, 0.3891037747941267, -0.0015232706561414185)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:rotateX:unitsResolve"]
 
             over "geometry_0"
             {
                 over "geometry_0" (
-                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxSDFMeshCollisionAPI"]
+                    delete apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI", "PhysicsRigidBodyAPI"]
+                    prepend apiSchemas = ["PhysxSDFMeshCollisionAPI"]
                 )
                 {
-                    uniform token physics:approximation = "sdf"
+                    quatf xformOp:orient = (1, 0, 0, 0)
+                    float3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (0, -5.134781488891349e-16, 0)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
                 }
             }
         }
@@ -423,7 +432,7 @@ def "World"
             quatf xformOp:orient = (6.123234e-17, 1, 0, 0)
             double xformOp:rotateX:unitsResolve = 90
             float3 xformOp:scale = (0.2, 0.2, 0.2)
-            double3 xformOp:translate = (1.2718262683464387, 0.03842857747566298, -0.06380293458675677)
+            double3 xformOp:translate = (0.9947561783427199, 0.03842857747566735, -0.03418280632764703)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:rotateX:unitsResolve"]
 
             over "geometry_0"
@@ -435,7 +444,7 @@ def "World"
                     uniform token physics:approximation = "sdf"
                     quatf xformOp:orient = (1, 0, 0, 0)
                     float3 xformOp:scale = (1, 1, 1)
-                    double3 xformOp:translate = (-0.32679069755694057, 6.043783050038481e-16, -0.22187794645903391)
+                    double3 xformOp:translate = (-1.1901590823981678e-13, -3.0531133177191805e-16, -1.4652262915615584)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
                 }
             }
@@ -470,8 +479,8 @@ def "World"
             token visibility = "inherited"
             quatf xformOp:orient = (0.70710677, 0, 0, -0.70710677)
             double xformOp:rotateX:unitsResolve = 90
-            float3 xformOp:scale = (1.2, 1.2, 1.2)
-            double3 xformOp:translate = (1.075096809682596, -0.04560571909652669, -0.4181968697907123)
+            float3 xformOp:scale = (1.22, 1.22, 1.22)
+            double3 xformOp:translate = (0.8149888776624827, -0.04560571909652668, -0.41187710630742197)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:rotateX:unitsResolve"]
 
             over "geometry_0"
@@ -493,7 +502,7 @@ def "World"
             quatf xformOp:orient = (0.9907924, -0.13035351, 0.028021853, 0.023519594)
             double xformOp:rotateX:unitsResolve = 90
             float3 xformOp:scale = (0.2, 0.2, 0.2)
-            double3 xformOp:translate = (0.29120990123442925, -0.6610178444917749, 0.057266754335131495)
+            double3 xformOp:translate = (0.009414017246025964, -0.6610178444917778, 0.07770526356954245)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:rotateX:unitsResolve"]
 
             over "geometry_0"
@@ -505,7 +514,7 @@ def "World"
                     uniform token physics:approximation = "sdf"
                     quatf xformOp:orient = (1, 0, 0, 0)
                     float3 xformOp:scale = (1, 1, 1)
-                    double3 xformOp:translate = (-0.002450287478657498, 0.03832609317004391, 0.010212479145284892)
+                    double3 xformOp:translate = (0.005038196762203365, -0.07880495160278117, -0.020998552199591902)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
                 }
             }
@@ -520,7 +529,7 @@ def "World"
             double xformOp:rotateX:unitsResolve = 90
             float3 xformOp:scale = (0.2, 0.2, 0.2)
             double3 xformOp:scale:unitsResolve = (0.01, 0.01, 0.01)
-            double3 xformOp:translate = (1.209777849799974, 0.47066618528331317, -0.07519313924462001)
+            double3 xformOp:translate = (0.9796966110997245, 0.47066618528330484, -0.050753143391285616)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:rotateX:unitsResolve", "xformOp:scale:unitsResolve"]
 
             over "geometry_0"
@@ -532,7 +541,7 @@ def "World"
                     uniform token physics:approximation = "sdf"
                     quatf xformOp:orient = (1, 0, 0, 0)
                     float3 xformOp:scale = (1, 1, 1)
-                    double3 xformOp:translate = (-32.654976067791864, -1.1652900866465643e-12, -8.572450158703305)
+                    double3 xformOp:translate = (0, 0, 0)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
                 }
             }
@@ -545,8 +554,8 @@ def "World"
             token visibility = "inherited"
             quatf xformOp:orient = (6.123234e-17, 0, 0, 1)
             double xformOp:rotateX:unitsResolve = 90
-            float3 xformOp:scale = (1.2, 1.2, 1.2)
-            double3 xformOp:translate = (0.24007734560252256, -0.9348596743844685, -0.4179733742752467)
+            float3 xformOp:scale = (1.22, 1.22, 1.22)
+            double3 xformOp:translate = (-0.005166622984513063, -0.9581998617755373, -0.41188)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:rotateX:unitsResolve"]
 
             over "geometry_0"
@@ -568,16 +577,16 @@ def "World"
             quatf xformOp:orient = (0.87884057, 0, 0, -0.47711557)
             double xformOp:rotateX:unitsResolve = 90
             float3 xformOp:scale = (0.15, 0.15, 0.15)
-            double3 xformOp:translate = (0.5895995239743685, -0.7248004097509264, -0.006991196782229537)
+            double3 xformOp:translate = (0.37399906533516813, -0.7416339292944675, -0.006991196782229553)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:rotateX:unitsResolve"]
 
             over "geometry_0"
             {
                 over "geometry_0" (
-                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "PhysicsMeshCollisionAPI", "PhysxSDFMeshCollisionAPI"]
+                    delete apiSchemas = ["PhysicsCollisionAPI", "PhysicsMeshCollisionAPI", "PhysicsRigidBodyAPI"]
+                    prepend apiSchemas = ["PhysxSDFMeshCollisionAPI"]
                 )
                 {
-                    uniform token physics:approximation = "sdf"
                 }
             }
         }

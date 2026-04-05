@@ -44,7 +44,7 @@ joint Bottle_Hardener_Storage -56.5 -29 56.85 -26 123 0
 joint Bottle_Resin_Workspace 34 -51.5 99.5 -44.9 122 0
 joint Above_Bottle_Resin_Workspace 34 -64.9 92.8 -24.7 122 0
 #Hardener
-joint Bottle_Hardener_Workspace 14.08 -29.34 99.55 105.55 -100.59 0
+joint Bottle_Hardener_Workspace 23.70 -57.54 111.57 -51.20 111.71 0
 
 #Roller Positions
 joint Roller_Storage_Pick -90.38 -40.14 21.9 84.6 91.3 0 

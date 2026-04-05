@@ -1,0 +1,62 @@
+# ============================================
+# Move Resin from Workplace to Storage - Robot Program
+# ============================================
+# This program picks up the resin bottle from the workpiece
+# position and returns it to storage using named
+# joint positions.
+# ============================================
+
+# Set a moderate speed for safe operation
+set_speed(0.5)
+
+# -----------------------------------------
+# Phase 1: Move to Home Position
+# -----------------------------------------
+# Skip if already at Home
+if near(Home)
+  wait(0.1)
+else
+  movetonamed(Home)
+  wait(1.0)
+endif
+
+# Ensure gripper is open before approaching bottle
+if gripper_open
+  wait(0.1)
+else
+  opengripper
+  wait(0.5)
+endif
+
+# -----------------------------------------
+# Phase 2: Pick Bottle from Workplace
+# -----------------------------------------
+movetonamed(Above_Bottle_Resin_Workspace)
+wait(0.5)
+movetonamed(Bottle_Resin_Workspace)
+wait(0.3)
+closegripper
+wait(1.0)
+movetonamed(Above_Bottle_Resin_Workspace)
+movetonamed(Home)
+wait(0.5)
+
+# -----------------------------------------
+# Phase 3: Move to Storage and Place Bottle
+# -----------------------------------------
+movetonamed(Above_Bottle_Resin_Storage)
+wait(0.5)
+movetonamed(Bottle_Resin_Storage)
+wait(0.3)
+opengripper
+wait(1.0)
+movetonamed(Above_Bottle_Resin_Storage)
+wait(0.5)
+
+# -----------------------------------------
+# Phase 4: Return Home
+# -----------------------------------------
+movetonamed(Home)
+wait(0.5)
+
+# Program complete!
