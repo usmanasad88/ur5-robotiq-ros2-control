@@ -99,6 +99,9 @@ class ROSBridge:
         self.node = None
         self.latest_joint_state: JointState | None = None
         self.latest_gripper_state: JointState | None = None
+        self.executor_state: str = "IDLE"          # IDLE / EXECUTING / PAUSED / ERROR
+        self.executor_status_msg: str = ""         # e.g. "Executing: move_resin.prog"
+        self.current_program_name: str = ""        # parsed from status messages
         self._spin_lock = threading.Lock()
         self._spin_thread: threading.Thread | None = None
         self._running = False
@@ -129,8 +132,11 @@ class ROSBridge:
             JointTrajectory, "/scaled_joint_trajectory_controller/joint_trajectory", 10
         )
 
-        # Subscriber -------------------------------------------------------
+        # Subscribers ------------------------------------------------------
         self.node.create_subscription(JointState, "/joint_states", self._joint_cb, 10)
+        self.node.create_subscription(
+            String, f"{prefix}/status", self._executor_status_cb, 10
+        )
 
         # Background spin so callbacks fire
         self._running = True
@@ -144,6 +150,26 @@ class ROSBridge:
             self.latest_joint_state = msg
         elif len(msg.name) == 1:
             self.latest_gripper_state = msg
+
+    def _executor_status_cb(self, msg: String):
+        """Parse executor status: ``"EXECUTING: move_resin.prog"``."""
+        raw = msg.data or ""
+        parts = raw.split(":", 1)
+        self.executor_state = parts[0].strip() if parts else "IDLE"
+        self.executor_status_msg = parts[1].strip() if len(parts) > 1 else ""
+        # Extract program name from messages like "Executing: foo.prog"
+        # or "Auto-executing: foo.prog"
+        if self.executor_state == "EXECUTING" and self.executor_status_msg:
+            # Status messages: "Executing: prog_name" or "Auto-executing: prog_name"
+            status_lower = self.executor_status_msg.lower()
+            for prefix in ("auto-executing: ", "executing: "):
+                if status_lower.startswith(prefix):
+                    self.current_program_name = self.executor_status_msg[len(prefix):]
+                    break
+            else:
+                self.current_program_name = self.executor_status_msg
+        elif self.executor_state in ("IDLE", "PAUSED", "ERROR"):
+            self.current_program_name = ""
 
     def _spin_loop(self):
         while self._running and rclpy.ok():
@@ -505,11 +531,17 @@ def api_status():
         "joint_state": None,
         "gripper_state": None,
         "speed": None,
+        "executor_state": "IDLE",
+        "executor_status_msg": "",
+        "current_program_name": "",
     }
     if bridge:
         data["joint_state"] = bridge.get_joint_state_dict()
         data["gripper_state"] = bridge.get_gripper_state_dict()
         data["speed"] = bridge.get_speed()
+        data["executor_state"] = bridge.executor_state
+        data["executor_status_msg"] = bridge.executor_status_msg
+        data["current_program_name"] = bridge.current_program_name
     return jsonify(data)
 
 

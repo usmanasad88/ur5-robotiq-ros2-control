@@ -251,6 +251,15 @@ class URRobotiqCortex(CortexBase):
               "xformOp:scale:unitsResolve": (Sdf.ValueTypeNames.Double3, Gf.Vec3d(0.75, 0.75, 0.75))}),
         ]
 
+        # New objects — no collisions
+        new_objects = [
+            ("basket_blue.glb", "basket_blue", [0.70, 0.20, 0.0], [0.3, 0.3, 0.3], [0.70710677, 0, 0, -0.70710677]),
+            ("blue_ball.glb", "blue_ball", [0.15, -0.85, 0.0], [0.3, 0.3, 0.3], [1, 0, 0, 0]),
+            ("punch.glb", "punch", [0.60, -0.10, 0.0], [0.3, 0.3, 0.3], [0.70710677, 0, 0, -0.70710677]),
+            ("purple_ball.glb", "purple_ball", [-0.10, -0.75, 0.0], [0.3, 0.3, 0.3], [1, 0, 0, 0]),
+            ("soccer_ball.glb", "soccer_ball", [0.85, 0.25, 0.0], [0.3, 0.3, 0.3], [1, 0, 0, 0]),
+        ]
+
         def add_sdf_collision(prim_path):
             """Apply SDF collision APIs to the inner geometry_0/geometry_0 prim.
 
@@ -304,6 +313,20 @@ class URRobotiqCortex(CortexBase):
                     if ENABLE_OBJECT_COLLISIONS:
                         add_sdf_collision(prim_path)
                     LOGGER(f"Loaded {obj_name}")
+                else:
+                    LOGGER(f"Object file not found: {obj_path}")
+            except Exception as e:
+                LOGGER(f"Error adding {obj_name}: {e}")
+
+        # Load new objects (no collisions)
+        for obj_file, obj_name, position, scale, orientation in new_objects:
+            try:
+                obj_path = str(ur_ws / f"isaac_standalone/Objects/{obj_file}")
+                if os.path.exists(obj_path):
+                    prim_path = f"/World/Objects/{obj_name}"
+                    add_reference_to_stage(usd_path=obj_path, prim_path=prim_path)
+                    set_prim_transform(prim_path, position, scale, orientation)
+                    LOGGER(f"Loaded {obj_name} (no collision)")
                 else:
                     LOGGER(f"Object file not found: {obj_path}")
             except Exception as e:
