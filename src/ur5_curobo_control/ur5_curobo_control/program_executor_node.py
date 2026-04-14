@@ -1593,6 +1593,12 @@ class UR5ProgramExecutorNode(Node):
                 return self.execute_force_mode_stop()
             elif instruction.type == InstructionType.MOVEL:
                 return self.execute_movel(instruction)
+            elif instruction.type == InstructionType.JOINT_DELTA:
+                return self.execute_joint_delta_batch()
+            elif instruction.type == InstructionType.SET_STEP_TIME:
+                self.step_time = instruction.step_time
+                self.get_logger().info(f"Step time set to {self.step_time} s")
+                return True
             elif instruction.type in (InstructionType.IF, InstructionType.ELSE, InstructionType.ENDIF):
                 # Conditionals are handled by execution_step, not here
                 return True
@@ -1723,7 +1729,73 @@ class UR5ProgramExecutorNode(Node):
             self.execute_force_mode(saved_force_instruction)
 
         return True
-    
+
+    def execute_joint_delta_batch(self) -> bool:
+        """Batch-execute consecutive jointdelta instructions.
+
+        Collects all consecutive JOINT_DELTA instructions starting from the
+        current index and publishes them as a single multi-waypoint
+        JointTrajectory.  This lets the UR controller smoothly interpolate
+        through the whole sequence rather than stopping at every step.
+
+        The instruction index is advanced past all consumed deltas (minus one,
+        since the main loop also increments by one).
+        """
+        if self.current_joint_state is None:
+            self.get_logger().error("No joint state available for jointdelta")
+            return False
+
+        step_time = getattr(self, 'step_time', 0.1)
+
+        # Collect consecutive jointdelta instructions
+        program = self.current_program
+        start_idx = self.current_instruction_idx
+        deltas = []
+        idx = start_idx
+        while idx < len(program) and program[idx].type == InstructionType.JOINT_DELTA:
+            deltas.append(program[idx].joint_delta)
+            idx += 1
+
+        self.get_logger().info(
+            f"Batching {len(deltas)} jointdelta steps into one trajectory "
+            f"({len(deltas) * step_time:.1f} s at {step_time} s/step)"
+        )
+
+        # Build multi-waypoint trajectory
+        current_pos = self.current_joint_state.cpu().numpy().copy()
+        traj_msg = JointTrajectory()
+        traj_msg.joint_names = self.joint_names
+
+        # Anchor at current position (t=0) so the controller ramps smoothly
+        # from standstill instead of jerking to the first delta.
+        anchor = JointTrajectoryPoint()
+        anchor.positions = current_pos.tolist()
+        anchor.velocities = [0.0] * 6
+        anchor.time_from_start.sec = 0
+        anchor.time_from_start.nanosec = 0
+        traj_msg.points.append(anchor)
+
+        for i, delta in enumerate(deltas):
+            current_pos = current_pos + np.array(delta)
+            t = step_time * (i + 1)
+
+            point = JointTrajectoryPoint()
+            point.positions = current_pos.tolist()
+            point.time_from_start.sec = int(t)
+            point.time_from_start.nanosec = int((t - int(t)) * 1e9)
+            traj_msg.points.append(point)
+
+        self.traj_pub.publish(traj_msg)
+
+        # Advance index past all consumed deltas (main loop adds +1)
+        self.current_instruction_idx += len(deltas) - 1
+
+        total_time = step_time * len(deltas)
+        if self._stop_event.wait(timeout=total_time + 0.5):
+            self.get_logger().info("Joint delta batch interrupted by stop/pause")
+            return False
+        return True
+
     def execute_wait(self, instruction: RobotInstruction) -> bool:
         """Execute a wait instruction."""
         if instruction.wait_duration is None:

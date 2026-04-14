@@ -53,6 +53,8 @@ class InstructionType(Enum):
     FORCE_MODE = auto()
     FORCE_MODE_STOP = auto()
     MOVEL = auto()
+    JOINT_DELTA = auto()
+    SET_STEP_TIME = auto()
     COMMENT = auto()
     UNKNOWN = auto()
 
@@ -96,6 +98,10 @@ class RobotInstruction:
     movel_distance: Optional[float] = None  # meters
     movel_speed: Optional[float] = None  # m/s linear speed
     movel_accel: Optional[float] = None  # m/s^2 acceleration
+    # Joint delta parameters (for JOINT_DELTA instruction)
+    joint_delta: Optional[List[float]] = None  # [d1,d2,d3,d4,d5,d6] in radians
+    # Step time for SET_STEP_TIME instruction
+    step_time: Optional[float] = None  # seconds per delta step
 
 
 class ProgramParser:
@@ -182,6 +188,18 @@ class ProgramParser:
         r'(?:\s*,\s*([0-9.]+))?'           # optional speed
         r'(?:\s*,\s*([0-9.]+))?'           # optional accel
         r'\s*\)',
+        re.IGNORECASE
+    )
+
+    # jointdelta([d1,d2,d3,d4,d5,d6])  — apply incremental joint-space delta (radians)
+    JOINT_DELTA_PATTERN = re.compile(
+        r'jointdelta\s*\(\s*\[([^\]]+)\]\s*\)',
+        re.IGNORECASE
+    )
+
+    # set_step_time(seconds)  — set duration for subsequent jointdelta steps
+    SET_STEP_TIME_PATTERN = re.compile(
+        r'set_step_time\s*\(\s*([0-9.]+)\s*\)',
         re.IGNORECASE
     )
 
@@ -470,6 +488,39 @@ class ProgramParser:
                 movel_speed=speed,
                 movel_accel=accel
             )
+
+        # Check for jointdelta([d1,...,d6])
+        match = self.JOINT_DELTA_PATTERN.search(line)
+        if match:
+            try:
+                deltas = [float(x.strip()) for x in match.group(1).split(',')]
+                if len(deltas) != 6:
+                    self.errors.append(f"Line {line_num}: Expected 6 delta values, got {len(deltas)}")
+                    return None
+                return RobotInstruction(
+                    type=InstructionType.JOINT_DELTA,
+                    line_number=line_num,
+                    raw_line=line,
+                    joint_delta=deltas
+                )
+            except ValueError as e:
+                self.errors.append(f"Line {line_num}: Failed to parse jointdelta: {e}")
+                return None
+
+        # Check for set_step_time(seconds)
+        match = self.SET_STEP_TIME_PATTERN.search(line)
+        if match:
+            try:
+                t = float(match.group(1))
+                return RobotInstruction(
+                    type=InstructionType.SET_STEP_TIME,
+                    line_number=line_num,
+                    raw_line=line,
+                    step_time=t
+                )
+            except ValueError as e:
+                self.errors.append(f"Line {line_num}: Failed to parse set_step_time: {e}")
+                return None
 
         # Check for runprogram(filename)
         match = self.RUN_PROGRAM_PATTERN.search(line)

@@ -53,6 +53,7 @@ joint Roller_Storage_Pick -90.38 -40.14 21.9 84.6 91.3 0
 joint table_far_corner 23.33 -18.72 76.69 141 -50.6 -13.43
 joint table_near_corner -55 -25.75 88.17 142.96 -71.27 -13.42
 
+joint lerobot_start -26.929 -99.408 142.092 -130.342 -91.1 -114.076
 
 # ============================================
 # Custom Positions (add your own below)
