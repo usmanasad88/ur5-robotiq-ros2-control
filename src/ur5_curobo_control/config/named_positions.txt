@@ -65,3 +65,16 @@ joint Pick_Rainbow_Ball -2 -22 30 59 91 5
 joint Pick_Orange_Ball -5 -27 45 73 100 5
 joint Drop_Position_Basket 21 -41 41 62 91 5
 
+
+# ============================================
+# Isaac Sim based Positions (for sorting cubes)
+# ============================================
+pose cube_pick_position 0.69 -0.24 0.1 0.0 1.0 0.0 0.0
+pose blue_basket_drop_position 0.73 0.46 0.3 0 1 0 0
+
+# Isaac Sim cuboid pick poses (auto-generated)
+pose cuboid_red 0.93698 -0.04790 0.1 0.0 1.0 0.0 0.0
+pose cuboid_green 0.97930 0.11237 0.1 0.0 1.0 0.0 0.0
+pose cuboid_blue 0.59709 0.28489 0.1 0.0 1.0 0.0 0.0
+pose cuboid_yellow 0.93057 0.16736 0.1 0.0 1.0 0.0 0.0
+pose cuboid_orange 0.61406 -0.04076 0.1 0.0 1.0 0.0 0.0

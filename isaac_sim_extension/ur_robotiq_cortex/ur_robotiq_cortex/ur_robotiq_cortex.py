@@ -11,6 +11,7 @@ from pxr import Gf, Usd, Sdf
 
 from isaacsim.core.api.objects import DynamicCuboid
 from isaacsim.cortex.framework.cortex_utils import load_behavior_module
+from pxr import UsdGeom
 from isaacsim.cortex.framework.cortex_world import CortexWorld
 from isaacsim.cortex.framework.dfb import DfDiagnosticsMonitor
 from isaacsim.cortex.framework.robot import (
@@ -122,6 +123,110 @@ def add_ur5_robotiq_to_stage(
     return CortexUr5Robotiq(name, prim_path, position, orientation)
 
 
+class ObjectPosePublisher:
+    """Publishes object poses to ROS 2 on /scene/object_poses (geometry_msgs/PoseArray).
+
+    - Publishes initial poses once on the first call to publish().
+    - Publishes dynamic poses every `publish_hz` physics steps thereafter.
+    """
+
+    TOPIC = "/scene/object_poses"
+    INITIAL_TOPIC = "/scene/object_initial_poses"
+
+    def __init__(self, prim_paths: list, publish_hz: float = 30.0, physics_hz: float = 60.0):
+        self._prim_paths = prim_paths
+        self._step_interval = max(1, int(physics_hz / publish_hz))
+        self._step_count = 0
+        self._initial_published = False
+
+        self._node = None
+        self._pub_dynamic = None
+        self._pub_initial = None
+
+        try:
+            import rclpy
+            from geometry_msgs.msg import PoseArray, Pose
+            from std_msgs.msg import Header
+            self._rclpy = rclpy
+            self._PoseArray = PoseArray
+            self._Pose = Pose
+            self._Header = Header
+            if not rclpy.ok():
+                rclpy.init()
+            self._node = rclpy.create_node("isaac_object_pose_publisher")
+            self._pub_dynamic = self._node.create_publisher(PoseArray, self.TOPIC, 10)
+            self._pub_initial = self._node.create_publisher(PoseArray, self.INITIAL_TOPIC, 10)
+            LOGGER(f"ObjectPosePublisher: publishing to {self.TOPIC} and {self.INITIAL_TOPIC}")
+        except Exception as e:
+            LOGGER(f"ObjectPosePublisher: ROS 2 unavailable — {e}")
+
+    def _build_pose_array(self, stage):
+        # Import locally so Pyright doesn't complain about missing stubs at analysis time
+        from geometry_msgs.msg import PoseArray, Pose  # noqa: F401
+        msg = PoseArray()
+        msg.header.frame_id = "world"
+        node = self._node  # already confirmed non-None by callers
+        try:
+            msg.header.stamp = node.get_clock().now().to_msg()
+        except Exception:
+            pass
+
+        poses = []
+        for prim_path in self._prim_paths:
+            prim = stage.GetPrimAtPath(prim_path)
+            if not prim.IsValid():
+                continue
+            xformable = UsdGeom.Xformable(prim)
+            world_xform = xformable.ComputeLocalToWorldTransform(0)
+            translation = world_xform.ExtractTranslation()
+            rotation = world_xform.ExtractRotationQuat()
+            imag = rotation.GetImaginary()
+
+            pose = Pose()
+            pose.position.x = float(translation[0])
+            pose.position.y = float(translation[1])
+            pose.position.z = float(translation[2])
+            pose.orientation.w = float(rotation.GetReal())
+            pose.orientation.x = float(imag[0])
+            pose.orientation.y = float(imag[1])
+            pose.orientation.z = float(imag[2])
+            poses.append(pose)
+        msg.poses = poses
+        return msg
+
+    def publish(self, stage):
+        if self._node is None or self._pub_initial is None or self._pub_dynamic is None:
+            return
+
+        self._step_count += 1
+
+        # Publish initial poses once (on first call, after the scene is ready)
+        if not self._initial_published:
+            try:
+                msg = self._build_pose_array(stage)
+                self._pub_initial.publish(msg)
+                LOGGER(f"ObjectPosePublisher: published initial poses for {len(msg.poses)} objects")
+                self._initial_published = True
+            except Exception as e:
+                LOGGER(f"ObjectPosePublisher: error publishing initial poses — {e}")
+
+        # Publish dynamic poses at the configured rate
+        if self._step_count % self._step_interval == 0:
+            try:
+                msg = self._build_pose_array(stage)
+                self._pub_dynamic.publish(msg)
+            except Exception as e:
+                LOGGER(f"ObjectPosePublisher: error publishing dynamic poses — {e}")
+
+    def shutdown(self):
+        if self._node is not None:
+            try:
+                self._node.destroy_node()
+            except Exception:
+                pass
+            self._node = None
+
+
 class URRobotiqCortex(CortexBase):
     """Isaac Sim sample for UR5/UR10 with Robotiq gripper.
 
@@ -147,6 +252,9 @@ class URRobotiqCortex(CortexBase):
         # Direct ROS 2 follower (bypasses Cortex DF network)
         self._direct_ros2_context = None
         self._use_direct_ros2 = False
+
+        # Object pose publisher (set up in setup_scene)
+        self._object_pose_publisher = None
 
         # Robot model: "ur5" or "ur10" — overridable via UR_ROBOT_TYPE env var
         self.robot_selection = os.environ.get("UR_ROBOT_TYPE", "ur5").lower()
@@ -234,15 +342,23 @@ class URRobotiqCortex(CortexBase):
 
         # Object specifications from Scene_update_locations1.usda
         objects = [
-            ("box.glb", "box", [0.020250664143844695, -0.799380035436923, -0.003023436160052201], [0.3, 0.3, 0.3], [0.67167205, 0, 0, 0.7408486]),
-            ("bottle.glb", "bottle", [0.5883761388085353, 0.3891037747941267, -0.0015232706561414185], [0.15, 0.15, 0.15], [0.89517987, 0, 0, -0.44570506]),
-            ("mold.glb", "mold", [0.9947561783427199, 0.03842857747566735, -0.03418280632764703], [0.2, 0.2, 0.2], [6.123234e-17, 1, 0, 0]),
+            ("basket_blue.glb", "basket_blue", [0.83496, -0.5, -0.02518], [0.3, 0.3, 0.3], [0.70710677, 0, 0, -0.70710677]),
+            # For the balls, x may be between 0.55 to 1.05 ; y may be between -0.32 to +0.30
+            # ("blue_ball.glb", "blue_ball", [0.69, -0.32, -0.05], [0.06, 0.06, 0.06], [1, 0, 0, 0]),
+            # ("punch.glb", "punch", [0.60, -0.10, -0.05], [0.1, 0.1, 0.1], [0.70710677, 0, 0, -0.70710677]),
+            # ("purple_ball.glb", "purple_ball", [0.80352, -0.18857, -0.05], [0.06, 0.06, 0.06], [1, 0, 0, 0]),
+            # ("soccer_ball.glb", "soccer_ball", [0.8695, -0.30667, -0.05], [0.06, 0.06, 0.06], [1, 0, 0, 0]),
+            
+            # ("box.glb", "box", [0.020250664143844695, -0.799380035436923, -0.003023436160052201], [0.3, 0.3, 0.3], [0.67167205, 0, 0, 0.7408486]),
+            # ("bottle.glb", "bottle", [0.5883761388085353, 0.3891037747941267, -0.0015232706561414185], [0.15, 0.15, 0.15], [0.89517987, 0, 0, -0.44570506]),
+            # ("bottle.glb", "bottle_01", [0.37399906533516813, -0.7416339292944675, -0.006991196782229553], [0.15, 0.15, 0.15], [0.87884057, 0, 0, -0.47711557]),
+            # ("mold.glb", "mold", [0.9947561783427199, 0.03842857747566735, -0.03418280632764703], [0.2, 0.2, 0.2], [6.123234e-17, 1, 0, 0]),
+            # ("roller.glb", "roller", [0.009414017246025964, -0.6610178444917778, 0.07770526356954245], [0.2, 0.2, 0.2], [0.9907924, -0.13035351, 0.028021853, 0.023519594]),
+            # ("scale.usd", "scale", [0.9796966110997245, 0.47066618528330484, -0.050753143391285616], [0.2, 0.2, 0.2], [0.70710677, 0, 0, 0.70710677]),
+
             ("chair.glb", "chair", [2.654924188733815, -0.7996137486341647, -0.4433299999999999], [0.6, 0.6, 0.6], [0.6846738, 0, 0, -0.72884965]),
-            ("table.glb", "table", [0.8149888776624827, -0.04560571909652668, -0.41187710630742197], [1.22, 1.22, 1.22], [0.70710677, 0, 0, -0.70710677]),
-            ("roller.glb", "roller", [0.009414017246025964, -0.6610178444917778, 0.07770526356954245], [0.2, 0.2, 0.2], [0.9907924, -0.13035351, 0.028021853, 0.023519594]),
-            ("scale.usd", "scale", [0.9796966110997245, 0.47066618528330484, -0.050753143391285616], [0.2, 0.2, 0.2], [0.70710677, 0, 0, 0.70710677]),
+            ("table.glb", "table", [0.8149888776624827, -0.04560571909652668, -0.41187710630742197], [1.22, 1.22, 1.22], [0.70710677, 0, 0, -0.70710677]),           
             ("table.glb", "table_01", [-0.005166622984513063, -0.9581998617755373, -0.41188], [1.22, 1.22, 1.22], [6.123234e-17, 0, 0, 1]),
-            ("bottle.glb", "bottle_01", [0.37399906533516813, -0.7416339292944675, -0.006991196782229553], [0.15, 0.15, 0.15], [0.87884057, 0, 0, -0.47711557]),
             ("chair.glb", "chair_01", [1.5211308724811525, 0.11280207853649299, -0.4129617690059313], [0.7, 0.7, 0.7], [0.6846738, 0, 0, -0.72884965]),
             ("chair.glb", "chair_02", [0.5518825573150291, -1.4596548944824432, -0.44333000000000217], [0.7, 0.7, 0.7], [0.021866286, 0, 0, -0.9997609]),
             ("chair.glb", "chair_03", [-0.030057869207804636, -1.4888103302584828, -0.44332999999999656], [0.7, 0.7, 0.7], [0.021866286, 0, 0, -0.9997609]),
@@ -251,14 +367,8 @@ class URRobotiqCortex(CortexBase):
               "xformOp:scale:unitsResolve": (Sdf.ValueTypeNames.Double3, Gf.Vec3d(0.75, 0.75, 0.75))}),
         ]
 
-        # New objects — no collisions
-        new_objects = [
-            ("basket_blue.glb", "basket_blue", [0.70, 0.20, 0.0], [0.3, 0.3, 0.3], [0.70710677, 0, 0, -0.70710677]),
-            ("blue_ball.glb", "blue_ball", [0.15, -0.85, 0.0], [0.3, 0.3, 0.3], [1, 0, 0, 0]),
-            ("punch.glb", "punch", [0.60, -0.10, 0.0], [0.3, 0.3, 0.3], [0.70710677, 0, 0, -0.70710677]),
-            ("purple_ball.glb", "purple_ball", [-0.10, -0.75, 0.0], [0.3, 0.3, 0.3], [1, 0, 0, 0]),
-            ("soccer_ball.glb", "soccer_ball", [0.85, 0.25, 0.0], [0.3, 0.3, 0.3], [1, 0, 0, 0]),
-        ]
+
+
 
         def add_sdf_collision(prim_path):
             """Apply SDF collision APIs to the inner geometry_0/geometry_0 prim.
@@ -311,26 +421,139 @@ class URRobotiqCortex(CortexBase):
                                 order_attr = prim.CreateAttribute("xformOpOrder", Sdf.ValueTypeNames.TokenArray, True)
                             order_attr.Set(base_ops + list(extra_xforms.keys()))
                     if ENABLE_OBJECT_COLLISIONS:
-                        add_sdf_collision(prim_path)
+                        # Easily reversible: change True to False to disable deformable balls
+                        if "ball" in obj_name and False:
+                            try:
+                                from omni.physx.scripts import deformableUtils
+                                from pxr import PhysxSchema
+                                inner_path = f"{prim_path}/geometry_0/geometry_0"
+                                
+                                deformableUtils.create_auto_volume_deformable_hierarchy(
+                                    stage = stage,
+                                    root_prim_path = prim_path,
+                                    simulation_tetmesh_path = f"{prim_path}/SimulationMesh",
+                                    collision_tetmesh_path = f"{prim_path}/CollisionMesh",
+                                    cooking_src_mesh_path = inner_path,
+                                    simulation_hex_mesh_enabled = True,
+                                    cooking_src_simplification_enabled = True,
+                                    set_visibility_with_guide_purpose = True
+                                )
+                                
+                                rootPrim = stage.GetPrimAtPath(prim_path)
+                                rootPrim.ApplyAPI("PhysxBaseDeformableBodyAPI")
+                                if rootPrim.HasAPI("PhysxBaseDeformableBodyAPI"):
+                                    rootPrim.GetAttribute("physxDeformableBody:disableGravity").Set(False)
+                                    
+                                # Increase rigidity by creating and assigning a stiff material
+                                from pxr import UsdShade
+                                mat_path = f"{prim_path}/StiffDeformableMaterial"
+                                mat = UsdShade.Material.Define(stage, mat_path)
+                                mat_prim = mat.GetPrim()
+                                
+                                mat_prim.ApplyAPI("OmniPhysicsBaseMaterialAPI")
+                                mat_prim.GetAttribute("omniphysics:dynamicFriction").Set(0.5)
+                                
+                                mat_prim.ApplyAPI("OmniPhysicsDeformableMaterialAPI")
+                                mat_prim.GetAttribute("omniphysics:youngsModulus").Set(5e9) # High stiffness (e.g. 5e7)
+                                mat_prim.GetAttribute("omniphysics:poissonsRatio").Set(0.45)
+                                
+                                mat_prim.ApplyAPI("PhysxDeformableMaterialAPI")
+                                mat_prim.GetAttribute("physxDeformableMaterial:elasticityDamping").Set(0.05)
+                                
+                                binding_api = UsdShade.MaterialBindingAPI.Apply(rootPrim)
+                                binding_api.Bind(mat, UsdShade.Tokens.weakerThanDescendants, "physics")
+                                    
+                                colPrim = stage.GetPrimAtPath(f"{prim_path}/CollisionMesh")
+                                if colPrim.IsValid():
+                                    physxCollisionAPI = PhysxSchema.PhysxCollisionAPI.Apply(colPrim)
+                                    if physxCollisionAPI:
+                                        physxCollisionAPI.GetContactOffsetAttr().Set(0.01)
+                                        physxCollisionAPI.GetRestOffsetAttr().Set(0.005)
+                            except Exception as edef:
+                                LOGGER(f"Failed to make {obj_name} deformable: {edef}")
+                                add_sdf_collision(prim_path)
+                        else:
+                            add_sdf_collision(prim_path)
                     LOGGER(f"Loaded {obj_name}")
                 else:
                     LOGGER(f"Object file not found: {obj_path}")
             except Exception as e:
                 LOGGER(f"Error adding {obj_name}: {e}")
 
-        # Load new objects (no collisions)
-        for obj_file, obj_name, position, scale, orientation in new_objects:
+        # Spawn coloured cuboids (scale 4x4x6 cm) at random positions on the table.
+        # x in [0.55, 1.05], y in [-0.32, 0.30], z = -0.05
+        rng = np.random.default_rng(seed=42)
+        cuboid_specs = [
+            ("cuboid_red",    np.array([1.0, 0.0, 0.0])),
+            ("cuboid_green",  np.array([0.0, 0.8, 0.0])),
+            ("cuboid_blue",   np.array([0.0, 0.3, 1.0])),
+            ("cuboid_yellow", np.array([1.0, 0.9, 0.0])),
+            ("cuboid_orange", np.array([1.0, 0.5, 0.0])),
+        ]
+        cuboid_scale = np.array([0.04, 0.04, 0.06])
+        for cub_name, cub_color in cuboid_specs:
+            cx = float(rng.uniform(0.55, 1.05))
+            cy = float(rng.uniform(-0.32, 0.30))
             try:
-                obj_path = str(ur_ws / f"isaac_standalone/Objects/{obj_file}")
-                if os.path.exists(obj_path):
-                    prim_path = f"/World/Objects/{obj_name}"
-                    add_reference_to_stage(usd_path=obj_path, prim_path=prim_path)
-                    set_prim_transform(prim_path, position, scale, orientation)
-                    LOGGER(f"Loaded {obj_name} (no collision)")
-                else:
-                    LOGGER(f"Object file not found: {obj_path}")
+                world.scene.add(
+                    DynamicCuboid(
+                        prim_path=f"/World/Objects/{cub_name}",
+                        name=cub_name,
+                        position=np.array([cx, cy, -0.05]),
+                        scale=cuboid_scale,
+                        color=cub_color,
+                    )
+                )
+                LOGGER(f"Spawned {cub_name} at ({cx:.3f}, {cy:.3f}, -0.05)")
             except Exception as e:
-                LOGGER(f"Error adding {obj_name}: {e}")
+                LOGGER(f"Error spawning {cub_name}: {e}")
+
+        # Write cuboid pick poses into named_positions.txt so the robot API
+        # can reach them via /api/move/named {name: cuboid_red} etc.
+        # Z and quaternion are constant; only x, y come from the random spawn.
+        PICK_Z = 0.1
+        PICK_QUAT = "0.0 1.0 0.0 0.0"
+        try:
+            named_pos_path = None
+            for candidate in [
+                ur_ws / "src/ur5_curobo_control/config/named_positions.txt",
+            ]:
+                if candidate.exists():
+                    named_pos_path = candidate
+                    break
+            if named_pos_path is None:
+                # Search for it
+                matches = list(ur_ws.rglob("named_positions.txt"))
+                if matches:
+                    named_pos_path = matches[0]
+
+            if named_pos_path is not None:
+                # Read existing content, strip old cuboid_* lines
+                lines = named_pos_path.read_text().splitlines()
+                lines = [l for l in lines if not l.strip().startswith("pose cuboid_")]
+                # Remove trailing blank lines, then add one separator
+                while lines and lines[-1].strip() == "":
+                    lines.pop()
+                lines.append("")
+                lines.append("# Isaac Sim cuboid pick poses (auto-generated)")
+                for cub_name, _ in cuboid_specs:
+                    # Retrieve the spawn position we used above
+                    cub_prim = stage.GetPrimAtPath(f"/World/Objects/{cub_name}")
+                    if cub_prim.IsValid():
+                        xf = UsdGeom.Xformable(cub_prim).ComputeLocalToWorldTransform(0)
+                        t = xf.ExtractTranslation()
+                        lines.append(f"pose {cub_name} {t[0]:.5f} {t[1]:.5f} {PICK_Z} {PICK_QUAT}")
+                lines.append("")
+                named_pos_path.write_text("\n".join(lines))
+                LOGGER(f"Wrote cuboid poses to {named_pos_path}")
+            else:
+                LOGGER("named_positions.txt not found — skipping cuboid pose export")
+        except Exception as e:
+            LOGGER(f"Error writing cuboid poses to named_positions.txt: {e}")
+
+        # Create the pose publisher for all cuboids
+        cuboid_prim_paths = [f"/World/Objects/{name}" for name, _ in cuboid_specs]
+        self._object_pose_publisher = ObjectPosePublisher(cuboid_prim_paths)
 
         # Add ground plane underneath with correct position
         try:
@@ -361,9 +584,7 @@ class URRobotiqCortex(CortexBase):
                 order_attr = ground_prim.GetAttribute("xformOpOrder")
                 if not order_attr.IsValid():
                     order_attr = ground_prim.CreateAttribute("xformOpOrder", Sdf.ValueTypeNames.TokenArray, True)
-                order_attr.Set(Usd.Tokens.xformOpOrder)
                 # Manually set the order list
-                order_attr.Clear()
                 order_attr.Set(["xformOp:translate", "xformOp:orient", "xformOp:scale"])
 
                 LOGGER("Added ground plane at z=-0.7504923076056753")
@@ -371,6 +592,41 @@ class URRobotiqCortex(CortexBase):
                 LOGGER("Could not create ground plane prim")
         except Exception as e:
             LOGGER(f"Error adding ground plane: {e}")
+
+        # # Add deformable plane
+        # try:
+        #     from pxr import Vt, UsdGeom
+        #     from omni.physx.scripts import deformableUtils
+            
+        #     def create_trimesh(stage, path, res):
+        #         triMesh = UsdGeom.Mesh.Define(stage, path)
+        #         step = 1.0 / res
+        #         verts = [(i * step, j * step, 0.0) for j in range(res + 1) for i in range(res + 1)]
+        #         idx = lambda i, j: j * (res + 1) + i
+        #         tris = [(idx(i,j), idx(i+1,j), idx(i+1,j+1)) + (idx(i,j), idx(i+1,j+1), idx(i,j+1))
+        #                 for j in range(res) for i in range(res)]
+        #         triMesh.GetPointsAttr().Set(Vt.Vec3fArray(verts))
+        #         triMesh.GetFaceVertexCountsAttr().Set([3] * (2 * res**2))
+        #         triMesh.GetFaceVertexIndicesAttr().Set([i for t in tris for i in t])
+        #         return triMesh
+
+        #     deformable_path = "/World/DeformablePlane"
+        #     triMesh = create_trimesh(stage, deformable_path, 20)
+        #     prim = triMesh.GetPrim()
+
+        #     # Set the offset so it falls near the table
+        #     triMesh.AddTranslateOp().Set(Gf.Vec3d(0.5, 0.0, 0.5))
+            
+        #     # Use deformableUtils script
+        #     success = deformableUtils.set_physics_surface_deformable_body(stage, prim.GetPath())
+            
+        #     prim.ApplyAPI("PhysxSurfaceDeformableBodyAPI")
+        #     if prim.HasAPI("PhysxSurfaceDeformableBodyAPI"):
+        #         prim.GetAttribute("physxDeformableBody:selfCollision").Set(True)
+                
+        #     LOGGER("Added deformable plane")
+        # except Exception as e:
+        #     LOGGER(f"Error adding deformable plane: {e}")
 
     # ------------------------------------------------------------------
     # Behavior loading
@@ -534,6 +790,15 @@ class URRobotiqCortex(CortexBase):
         self._physics_step_count += 1
         world = self.get_world()
 
+        # Publish object poses every step (publisher throttles internally)
+        if self._object_pose_publisher is not None:
+            try:
+                stage = omni.usd.get_context().get_stage()
+                self._object_pose_publisher.publish(stage)
+            except Exception as e:
+                if self._physics_step_count % 300 == 0:
+                    LOGGER(f"Object pose publisher error: {e}")
+
         if self._use_direct_ros2 and self._direct_ros2_context is not None:
             try:
                 self._direct_ros2_context.update_from_ros()
@@ -573,3 +838,7 @@ class URRobotiqCortex(CortexBase):
             if hasattr(self._direct_ros2_context, "shutdown"):
                 self._direct_ros2_context.shutdown()
             self._direct_ros2_context = None
+
+        if self._object_pose_publisher is not None:
+            self._object_pose_publisher.shutdown()
+            self._object_pose_publisher = None
