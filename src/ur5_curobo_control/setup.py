@@ -13,8 +13,11 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
-        (os.path.join('share', package_name, 'config'), glob('config/*')),
-        (os.path.join('share', package_name, 'programs'), glob('programs/*.prog')),
+        # Only ship build-time configs (URDF / cuRobo YAMLs / teleop YAML).
+        # named_positions.txt and programs/*.prog are read directly from the
+        # source tree at runtime so edits take effect without a colcon build.
+        (os.path.join('share', package_name, 'config'),
+            glob('config/*.yml') + glob('config/*.yaml') + glob('config/*.urdf')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

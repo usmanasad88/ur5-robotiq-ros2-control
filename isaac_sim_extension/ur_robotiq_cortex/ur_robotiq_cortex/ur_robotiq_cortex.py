@@ -256,6 +256,12 @@ class URRobotiqCortex(CortexBase):
         # Object pose publisher (set up in setup_scene)
         self._object_pose_publisher = None
 
+        # Cuboid bookkeeping for re-randomization on reset
+        self._cuboid_specs = []
+        self._cuboid_positions = {}  # name -> (x, y) last sampled
+        self._cuboid_rng = np.random.default_rng()
+        self._named_positions_path = None
+
         # Robot model: "ur5" or "ur10" — overridable via UR_ROBOT_TYPE env var
         self.robot_selection = os.environ.get("UR_ROBOT_TYPE", "ur5").lower()
         LOGGER(
@@ -342,7 +348,7 @@ class URRobotiqCortex(CortexBase):
 
         # Object specifications from Scene_update_locations1.usda
         objects = [
-            ("basket_blue.glb", "basket_blue", [0.83496, -0.5, -0.02518], [0.3, 0.3, 0.3], [0.70710677, 0, 0, -0.70710677]),
+            ("basket_blue.glb", "basket_blue", [0.53, -0.5, -0.02518], [0.3, 0.3, 0.3], [0.70710677, 0, 0, -0.70710677]),
             # For the balls, x may be between 0.55 to 1.05 ; y may be between -0.32 to +0.30
             # ("blue_ball.glb", "blue_ball", [0.69, -0.32, -0.05], [0.06, 0.06, 0.06], [1, 0, 0, 0]),
             # ("punch.glb", "punch", [0.60, -0.10, -0.05], [0.1, 0.1, 0.1], [0.70710677, 0, 0, -0.70710677]),
@@ -357,7 +363,7 @@ class URRobotiqCortex(CortexBase):
             # ("scale.usd", "scale", [0.9796966110997245, 0.47066618528330484, -0.050753143391285616], [0.2, 0.2, 0.2], [0.70710677, 0, 0, 0.70710677]),
 
             ("chair.glb", "chair", [2.654924188733815, -0.7996137486341647, -0.4433299999999999], [0.6, 0.6, 0.6], [0.6846738, 0, 0, -0.72884965]),
-            ("table.glb", "table", [0.8149888776624827, -0.04560571909652668, -0.41187710630742197], [1.22, 1.22, 1.22], [0.70710677, 0, 0, -0.70710677]),           
+            ("table.glb", "table", [0.65, -0.04560571909652668, -0.41187710630742197], [1.22, 1.22, 1.22], [0.70710677, 0, 0, -0.70710677]),           
             ("table.glb", "table_01", [-0.005166622984513063, -0.9581998617755373, -0.41188], [1.22, 1.22, 1.22], [6.123234e-17, 0, 0, 1]),
             ("chair.glb", "chair_01", [1.5211308724811525, 0.11280207853649299, -0.4129617690059313], [0.7, 0.7, 0.7], [0.6846738, 0, 0, -0.72884965]),
             ("chair.glb", "chair_02", [0.5518825573150291, -1.4596548944824432, -0.44333000000000217], [0.7, 0.7, 0.7], [0.021866286, 0, 0, -0.9997609]),
@@ -482,7 +488,6 @@ class URRobotiqCortex(CortexBase):
 
         # Spawn coloured cuboids (scale 4x4x6 cm) at random positions on the table.
         # x in [0.55, 1.05], y in [-0.32, 0.30], z = -0.05
-        rng = np.random.default_rng(seed=42)
         cuboid_specs = [
             ("cuboid_red",    np.array([1.0, 0.0, 0.0])),
             ("cuboid_green",  np.array([0.0, 0.8, 0.0])),
@@ -490,10 +495,12 @@ class URRobotiqCortex(CortexBase):
             ("cuboid_yellow", np.array([1.0, 0.9, 0.0])),
             ("cuboid_orange", np.array([1.0, 0.5, 0.0])),
         ]
+        self._cuboid_specs = cuboid_specs
         cuboid_scale = np.array([0.04, 0.04, 0.06])
         for cub_name, cub_color in cuboid_specs:
-            cx = float(rng.uniform(0.55, 1.05))
-            cy = float(rng.uniform(-0.32, 0.30))
+            cx = float(self._cuboid_rng.uniform(0.40, 0.65))
+            cy = float(self._cuboid_rng.uniform(-0.32, 0.30))
+            self._cuboid_positions[cub_name] = (cx, cy)
             try:
                 world.scene.add(
                     DynamicCuboid(
@@ -508,48 +515,19 @@ class URRobotiqCortex(CortexBase):
             except Exception as e:
                 LOGGER(f"Error spawning {cub_name}: {e}")
 
-        # Write cuboid pick poses into named_positions.txt so the robot API
-        # can reach them via /api/move/named {name: cuboid_red} etc.
-        # Z and quaternion are constant; only x, y come from the random spawn.
-        PICK_Z = 0.1
-        PICK_QUAT = "0.0 1.0 0.0 0.0"
-        try:
-            named_pos_path = None
-            for candidate in [
-                ur_ws / "src/ur5_curobo_control/config/named_positions.txt",
-            ]:
-                if candidate.exists():
-                    named_pos_path = candidate
-                    break
-            if named_pos_path is None:
-                # Search for it
-                matches = list(ur_ws.rglob("named_positions.txt"))
-                if matches:
-                    named_pos_path = matches[0]
+        # Resolve named_positions.txt once and cache for reset-time rewrites.
+        named_pos_path = None
+        for candidate in [ur_ws / "src/ur5_curobo_control/config/named_positions.txt"]:
+            if candidate.exists():
+                named_pos_path = candidate
+                break
+        if named_pos_path is None:
+            matches = list(ur_ws.rglob("named_positions.txt"))
+            if matches:
+                named_pos_path = matches[0]
+        self._named_positions_path = named_pos_path
 
-            if named_pos_path is not None:
-                # Read existing content, strip old cuboid_* lines
-                lines = named_pos_path.read_text().splitlines()
-                lines = [l for l in lines if not l.strip().startswith("pose cuboid_")]
-                # Remove trailing blank lines, then add one separator
-                while lines and lines[-1].strip() == "":
-                    lines.pop()
-                lines.append("")
-                lines.append("# Isaac Sim cuboid pick poses (auto-generated)")
-                for cub_name, _ in cuboid_specs:
-                    # Retrieve the spawn position we used above
-                    cub_prim = stage.GetPrimAtPath(f"/World/Objects/{cub_name}")
-                    if cub_prim.IsValid():
-                        xf = UsdGeom.Xformable(cub_prim).ComputeLocalToWorldTransform(0)
-                        t = xf.ExtractTranslation()
-                        lines.append(f"pose {cub_name} {t[0]:.5f} {t[1]:.5f} {PICK_Z} {PICK_QUAT}")
-                lines.append("")
-                named_pos_path.write_text("\n".join(lines))
-                LOGGER(f"Wrote cuboid poses to {named_pos_path}")
-            else:
-                LOGGER("named_positions.txt not found — skipping cuboid pose export")
-        except Exception as e:
-            LOGGER(f"Error writing cuboid poses to named_positions.txt: {e}")
+        self._write_cuboid_pick_poses()
 
         # Create the pose publisher for all cuboids
         cuboid_prim_paths = [f"/World/Objects/{name}" for name, _ in cuboid_specs]
@@ -831,6 +809,59 @@ class URRobotiqCortex(CortexBase):
         world = self.get_world()
         if world and world.physics_callback_exists("sim_step"):
             world.remove_physics_callback("sim_step")
+
+    def _write_cuboid_pick_poses(self):
+        """Rewrite the cuboid_* entries in named_positions.txt using the last sampled (x, y)."""
+        named_pos_path = self._named_positions_path
+        if named_pos_path is None or not self._cuboid_specs:
+            LOGGER("named_positions.txt not found — skipping cuboid pose export")
+            return
+        PICK_Z = 0.1
+        PICK_QUAT = "0.0 1.0 0.0 0.0"
+        try:
+            lines = named_pos_path.read_text().splitlines()
+            lines = [l for l in lines if not l.strip().startswith("pose cuboid_")]
+            while lines and lines[-1].strip() == "":
+                lines.pop()
+            lines.append("")
+            lines.append("# Isaac Sim cuboid pick poses (auto-generated)")
+            for cub_name, _ in self._cuboid_specs:
+                xy = self._cuboid_positions.get(cub_name)
+                if xy is None:
+                    continue
+                cx, cy = xy
+                lines.append(f"pose {cub_name} {cx:.5f} {cy:.5f} {PICK_Z} {PICK_QUAT}")
+            lines.append("")
+            named_pos_path.write_text("\n".join(lines))
+            LOGGER(f"Wrote cuboid poses to {named_pos_path}")
+        except Exception as e:
+            LOGGER(f"Error writing cuboid poses to named_positions.txt: {e}")
+
+    async def setup_post_reset(self):
+        """Re-sample cuboid spawn positions so each reset gives fresh locations."""
+        world = self.get_world()
+        if world is None or not self._cuboid_specs:
+            return
+        for cub_name, _ in self._cuboid_specs:
+            cx = float(self._cuboid_rng.uniform(0.40, 0.65))
+            cy = float(self._cuboid_rng.uniform(-0.32, 0.30))
+            self._cuboid_positions[cub_name] = (cx, cy)
+            position = np.array([cx, cy, -0.05])
+            try:
+                cub = world.scene.get_object(cub_name)
+                if cub is None:
+                    continue
+                cub.set_default_state(position=position)
+                cub.set_world_pose(position=position)
+                if hasattr(cub, "set_linear_velocity"):
+                    cub.set_linear_velocity(np.zeros(3))
+                if hasattr(cub, "set_angular_velocity"):
+                    cub.set_angular_velocity(np.zeros(3))
+                LOGGER(f"Re-spawned {cub_name} at ({cx:.3f}, {cy:.3f}, -0.05)")
+            except Exception as e:
+                LOGGER(f"Error re-spawning {cub_name}: {e}")
+
+        self._write_cuboid_pick_poses()
 
     def world_cleanup(self):
         if self._direct_ros2_context:

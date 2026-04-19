@@ -42,7 +42,7 @@ import termios
 import tty
 from datetime import datetime
 from enum import Enum, auto
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 # Add curobo to path if not installed
 sys.path.append('/home/mani/isaac-sim-standalone-5.0.0-linux-x86_64/curobo/src')
@@ -56,7 +56,8 @@ from curobo.util_file import load_yaml
 # Import the program parser
 from ur5_curobo_control.program_parser import (
     ProgramParser, RobotInstruction, InstructionType,
-    NamedPositionsParser, NamedPosition, PositionType
+    NamedPositionsParser, NamedPosition, PositionType,
+    read_program_arg_names, substitute_template, bind_program_args,
 )
 
 # Import Robotiq gripper action
@@ -101,6 +102,8 @@ class UR5ProgramExecutorNode(Node):
             ParameterDescriptor(description='Trajectory interpolation timestep'))
         self.declare_parameter('program_file', '',
             ParameterDescriptor(description='Program file to load'))
+        self.declare_parameter('program_args', '',
+            ParameterDescriptor(description='JSON object of args for templated programs (e.g. {"object":"X","safe":"Home"})'))
         self.declare_parameter('auto_execute', False,
             ParameterDescriptor(description='Auto-execute program after loading'))
         self.declare_parameter('use_fake_hardware', True,
@@ -310,21 +313,35 @@ class UR5ProgramExecutorNode(Node):
                 self.get_logger().info(f"Speed updated externally to {new_speed:.2f}")
         return SetParametersResult(successful=True)
     
+    def _read_program_args_param(self) -> dict:
+        """Read the `program_args` parameter (JSON object string) into a dict."""
+        raw = self.get_parameter('program_args').value or ''
+        raw = raw.strip()
+        if not raw:
+            return {}
+        try:
+            import json
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                return {str(k): str(v) for k, v in data.items()}
+            self.get_logger().warn(f"program_args must be a JSON object, got {type(data).__name__}")
+        except Exception as e:
+            self.get_logger().warn(f"Failed to parse program_args JSON: {e}")
+        return {}
+
     def _auto_load_program(self, program_file: str):
         """Auto-load a program file at startup."""
-        # Build full path
-        if not os.path.isabs(program_file):
-            if self.programs_dir:
-                program_file = os.path.join(self.programs_dir, program_file)
-        
+        program_file = self._resolve_program_path(program_file)
+
         if not os.path.exists(program_file):
             self.get_logger().error(f"Program file not found: {program_file}")
             return
-        
+
         try:
-            self.current_program = self.parser.parse_file(program_file)
-            errors = self.parser.get_errors()
-            
+            args = self._read_program_args_param()
+            instructions, errors = self.load_templated_program(program_file, args=args)
+            self.current_program = instructions
+
             if errors:
                 self.get_logger().warn(f"Parse warnings: {errors}")
             
@@ -887,29 +904,37 @@ class UR5ProgramExecutorNode(Node):
             response.message = "Set 'program_file' parameter before calling load_program"
             return response
         
-        # Build full path
-        if not os.path.isabs(program_file):
-            if self.programs_dir:
-                program_file = os.path.join(self.programs_dir, program_file)
-        
+        program_file = self._resolve_program_path(program_file)
+
         if not os.path.exists(program_file):
             response.success = False
             response.message = f"Program file not found: {program_file}"
             return response
-        
+
         try:
-            self.current_program = self.parser.parse_file(program_file)
-            errors = self.parser.get_errors()
-            
+            args = self._read_program_args_param()
+            instructions, errors = self.load_templated_program(program_file, args=args)
+
+            # Treat unsubstituted-token / missing-arg messages as fatal — they
+            # would otherwise silently leave `{name}` literals in the program.
+            fatal = [e for e in errors if 'unsubstituted' in e or 'missing required arg' in e or 'unknown keyword arg' in e]
+            if fatal:
+                response.success = False
+                response.message = f"Failed to load program: {'; '.join(fatal)}"
+                self.state = ExecutorState.ERROR
+                return response
+
+            self.current_program = instructions
             if errors:
                 self.get_logger().warn(f"Parse warnings: {errors}")
-            
+
             self.current_program_name = os.path.basename(program_file)
             self.current_instruction_idx = 0
             self.state = ExecutorState.IDLE
-            
+
+            args_desc = f" (args: {args})" if args else ""
             response.success = True
-            response.message = f"Loaded program: {self.current_program_name} ({len(self.current_program)} instructions)"
+            response.message = f"Loaded program: {self.current_program_name}{args_desc} ({len(self.current_program)} instructions)"
             self.publish_status(f"Loaded: {self.current_program_name}")
             
         except Exception as e:
@@ -991,7 +1016,11 @@ class UR5ProgramExecutorNode(Node):
             # Plan motion
             result = self.motion_gen.plan_single(
                 start_state, target_pose,
-                MotionGenPlanConfig(enable_graph=False, timeout=5.0)
+                MotionGenPlanConfig(
+                    enable_graph=False,
+                    timeout=5.0,
+                    time_dilation_factor=self.speed_factor,
+                ),
             )
             
             if result.success.item():
@@ -1221,7 +1250,11 @@ class UR5ProgramExecutorNode(Node):
             
             result = self.motion_gen.plan_single(
                 start_state, target_pose,
-                MotionGenPlanConfig(enable_graph=False, timeout=5.0)
+                MotionGenPlanConfig(
+                    enable_graph=False,
+                    timeout=5.0,
+                    time_dilation_factor=self.speed_factor,
+                ),
             )
             
             if result.success.item():
@@ -1437,7 +1470,11 @@ class UR5ProgramExecutorNode(Node):
             start_state = CuroboJointState.from_position(joint_state.view(1, -1))
             result = self.motion_gen.plan_single(
                 start_state, target_pose,
-                MotionGenPlanConfig(enable_graph=False, timeout=0.5)
+                MotionGenPlanConfig(
+                    enable_graph=False,
+                    timeout=0.5,
+                    time_dilation_factor=self.speed_factor,
+                ),
             )
             if result.success.item():
                 traj = result.get_interpolated_plan()
@@ -1665,7 +1702,11 @@ class UR5ProgramExecutorNode(Node):
 
             result = self.motion_gen.plan_single_js(
                 start_state, goal_state,
-                MotionGenPlanConfig(enable_graph=False, timeout=2.0)
+                MotionGenPlanConfig(
+                    enable_graph=False,
+                    timeout=2.0,
+                    time_dilation_factor=self.speed_factor,
+                ),
             )
 
             if result.success.item():
@@ -2302,57 +2343,119 @@ class UR5ProgramExecutorNode(Node):
                 self.execute_force_mode(saved_force_instruction)
             return False
     
+    def _resolve_program_path(self, filename: str) -> str:
+        """Resolve a program filename to a full path, adding .prog if missing."""
+        if not filename.endswith('.prog') and not filename.endswith('.txt'):
+            # Only auto-append if the file doesn't exist as-given
+            if not os.path.exists(filename) and not os.path.isabs(filename):
+                filename = filename + '.prog'
+        if not os.path.isabs(filename) and self.programs_dir:
+            return os.path.join(self.programs_dir, filename)
+        return filename
+
+    def load_templated_program(self, filepath: str, args: Optional[dict] = None) -> Tuple[List[RobotInstruction], List[str]]:
+        """Load a program file, apply `{name}` template substitution, and parse.
+
+        Returns (instructions, errors). Errors include missing args (declared but
+        not provided) and any parser errors on the substituted text.
+        """
+        errs: List[str] = []
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                template_text = f.read()
+        except OSError as e:
+            return [], [f"cannot read {filepath}: {e}"]
+
+        arg_names = read_program_arg_names(filepath)
+        bound, bind_errs = bind_program_args(arg_names, None, args or {})
+        errs.extend(bind_errs)
+
+        if arg_names or bound:
+            text, missing = substitute_template(template_text, bound)
+            if missing:
+                errs.append(f"unsubstituted tokens: {{{'}, {'.join(sorted(set(missing)))}}}")
+        else:
+            text = template_text
+
+        sub_parser = ProgramParser()
+        instructions = sub_parser.parse_string(text)
+        errs.extend(sub_parser.get_errors())
+        return instructions, errs
+
     def execute_run_program(self, instruction: RobotInstruction) -> bool:
-        """Execute a sub-program from a .prog file.
-        
-        Parses the sub-program and inserts its instructions into the
-        current program at the current position, replacing the runprogram
-        instruction. This allows programs to call other programs.
+        """Execute a sub-program from a .prog file, with optional arguments.
+
+        The sub-program may declare `# args: a, b` and use `{a}`, `{b}` tokens
+        anywhere in its body. Arguments come from the calling instruction's
+        positional and/or keyword args. The substituted text is parsed and its
+        instructions are inserted right after the current runprogram step.
         """
         filename = instruction.sub_program
         if not filename:
             self.get_logger().error("runprogram: no filename specified")
             return False
-        
+
         # Guard against infinite recursion
         self.current_sub_program_depth += 1
         if self.current_sub_program_depth > self.max_sub_program_depth:
             self.get_logger().error(f"runprogram: max recursion depth ({self.max_sub_program_depth}) exceeded")
             self.current_sub_program_depth -= 1
             return False
-        
-        # Build full path
-        if not os.path.isabs(filename):
-            if self.programs_dir:
-                filepath = os.path.join(self.programs_dir, filename)
-            else:
-                filepath = filename
-        else:
-            filepath = filename
-        
+
+        filepath = self._resolve_program_path(filename)
         if not os.path.exists(filepath):
             self.get_logger().error(f"runprogram: file not found: {filepath}")
             self.current_sub_program_depth -= 1
             return False
-        
+
         try:
+            # Resolve args: declared names + caller positional/keyword.
+            arg_names = read_program_arg_names(filepath)
+            bound, bind_errs = bind_program_args(
+                arg_names,
+                instruction.sub_program_args_positional,
+                instruction.sub_program_args_keyword,
+            )
+            if bind_errs:
+                for e in bind_errs:
+                    self.get_logger().error(f"runprogram {filename}: {e}")
+                self.current_sub_program_depth -= 1
+                return False
+
+            # Load file, substitute, parse.
+            with open(filepath, 'r', encoding='utf-8') as f:
+                template_text = f.read()
+            if arg_names or bound:
+                text, missing = substitute_template(template_text, bound)
+                if missing:
+                    self.get_logger().error(
+                        f"runprogram {filename}: unsubstituted tokens: {sorted(set(missing))}"
+                    )
+                    self.current_sub_program_depth -= 1
+                    return False
+            else:
+                text = template_text
+
             sub_parser = ProgramParser()
-            sub_instructions = sub_parser.parse_file(filepath)
-            errors = sub_parser.get_errors()
-            if errors:
-                self.get_logger().warn(f"Sub-program parse warnings: {errors}")
-            
-            self.get_logger().info(f"Running sub-program: {filename} ({len(sub_instructions)} instructions)")
-            
-            # Insert sub-program instructions right after the current runprogram instruction
+            sub_instructions = sub_parser.parse_string(text)
+            parse_errors = sub_parser.get_errors()
+            if parse_errors:
+                self.get_logger().warn(f"Sub-program parse warnings: {parse_errors}")
+
+            args_desc = ""
+            if bound:
+                args_desc = " with args " + ", ".join(f"{k}={v}" for k, v in bound.items())
+            self.get_logger().info(
+                f"Running sub-program: {filename}{args_desc} ({len(sub_instructions)} instructions)"
+            )
+
             insert_idx = self.current_instruction_idx + 1
             for i, sub_inst in enumerate(sub_instructions):
                 self.current_program.insert(insert_idx + i, sub_inst)
-            
-            self.get_logger().info(f"Inserted {len(sub_instructions)} instructions from {filename}")
+
             self.current_sub_program_depth -= 1
             return True
-            
+
         except Exception as e:
             self.get_logger().error(f"Error loading sub-program {filename}: {e}")
             self.current_sub_program_depth -= 1
@@ -2518,18 +2621,25 @@ class UR5ProgramExecutorNode(Node):
         vel_np = vel_tensor.squeeze(0).cpu().numpy() if vel_tensor is not None else None
         steps = traj_np.shape[0]
 
-        # Apply speed factor to trajectory timing.
-        # Start at (i+1)*dt so the first waypoint is in the future, not at t=0.
-        # A waypoint at t=0 tells the controller "you must already be here",
-        # which causes immediate state-tolerance violations.
-        effective_dt = self.dt / self.speed_factor
+        # Speed scaling is applied at plan time via time_dilation_factor, so
+        # positions and velocities are already consistent at interpolation_dt.
+        # Anchor at the current joint state (t=0, zero velocity) so the
+        # controller ramps from standstill instead of extrapolating to the
+        # first waypoint with a velocity mismatch.
+        if self.current_joint_state is not None:
+            anchor = JointTrajectoryPoint()
+            anchor.positions = self.current_joint_state.cpu().numpy().tolist()
+            anchor.velocities = [0.0] * 6
+            anchor.time_from_start.sec = 0
+            anchor.time_from_start.nanosec = 0
+            traj_msg.points.append(anchor)
 
         for i in range(steps):
             point = JointTrajectoryPoint()
             point.positions = traj_np[i].tolist()
             if vel_np is not None:
                 point.velocities = vel_np[i].tolist()
-            time_sec = (i + 1) * effective_dt
+            time_sec = (i + 1) * self.dt
             point.time_from_start.sec = int(time_sec)
             point.time_from_start.nanosec = int((time_sec - int(time_sec)) * 1e9)
             traj_msg.points.append(point)
@@ -2544,8 +2654,7 @@ class UR5ProgramExecutorNode(Node):
             traj_tensor = traj_input
         
         steps = traj_tensor.shape[1] if len(traj_tensor.shape) > 2 else traj_tensor.shape[0]
-        effective_dt = self.dt / self.speed_factor
-        return steps * effective_dt
+        return steps * self.dt
     
     def stop_robot(self):
         """Stop robot by sending current position as target with safe deceleration."""

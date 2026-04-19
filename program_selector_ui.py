@@ -237,6 +237,28 @@ class ROSProgramController:
             return future.result().results[0].successful
         return False
     
+    def set_program_args(self, args: dict | None) -> bool:
+        """Set the program_args parameter (JSON string). Empty dict/None clears it."""
+        if not ROS_AVAILABLE:
+            return False
+
+        request = SetParameters.Request()
+        param = Parameter()
+        param.name = 'program_args'
+        param.value = ParameterValue(
+            type=ParameterType.PARAMETER_STRING,
+            string_value=json.dumps(args) if args else '',
+        )
+        request.parameters = [param]
+
+        future = self.set_parameters_client.call_async(request)
+        if not self._spin_for_future(future, timeout_sec=2.0):
+            return False
+
+        if future.result() is not None:
+            return future.result().results[0].successful
+        return False
+
     def load_program(self) -> tuple[bool, str]:
         """Load the currently set program."""
         if not ROS_AVAILABLE:
@@ -1896,10 +1918,21 @@ def main():
         return
     
     st.subheader(f"📋 Available Programs ({len(programs)})")
-    
+
+    # Load helpers for per-program template args
+    try:
+        from ur5_curobo_control.program_parser import read_program_arg_names
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).parent / "src/ur5_curobo_control/ur5_curobo_control"))
+        from program_parser import read_program_arg_names
+
+    poses, joints, _ = load_named_positions()
+    position_names = sorted({p.name for p in poses} | {j.name for j in joints})
+    default_second = next((n for n in position_names if n.lower() == 'home'), None)
+
     # Create grid layout for programs
     cols = st.columns(3)
-    
+
     for idx, program_name in enumerate(programs):
         col = cols[idx % 3]
         
@@ -1912,7 +1945,24 @@ def main():
                 program_path = get_programs_directory() / program_name
                 description = read_program_description(program_path)
                 st.caption(description)
-                
+
+                # Per-program template args: one dropdown per declared arg name.
+                arg_names = read_program_arg_names(str(program_path))
+                bound_args: dict[str, str] = {}
+                if arg_names and position_names:
+                    for arg_idx, arg_name in enumerate(arg_names):
+                        default_val = default_second if arg_idx >= 1 and default_second else position_names[0]
+                        default_index = position_names.index(default_val) if default_val in position_names else 0
+                        selected = st.selectbox(
+                            arg_name,
+                            position_names,
+                            index=default_index,
+                            key=f"arg_{program_name}_{arg_name}",
+                        )
+                        bound_args[arg_name] = selected
+                elif arg_names and not position_names:
+                    st.caption("⚠️ Args declared but no named positions available")
+
                 # Load & Execute button
                 button_key = f"exec_{program_name}"
                 if st.button(
@@ -1933,14 +1983,15 @@ def main():
                         
                         # Set program file parameter
                         st.session_state.status_message = '<p class="status-running">⏳ Loading program...</p>'
-                        
+
+                        st.session_state.controller.set_program_args(bound_args)
                         if st.session_state.controller.set_program_file(program_name):
                             # Load the program
                             success, msg = st.session_state.controller.load_program()
-                            
+
                             if success:
                                 st.session_state.current_program = program_name
-                                
+
                                 # Execute the program
                                 success_exec, msg_exec = st.session_state.controller.execute_program()
                                 
@@ -1968,9 +2019,10 @@ def main():
                     use_container_width=True
                 ):
                     if st.session_state.controller:
+                        st.session_state.controller.set_program_args(bound_args)
                         if st.session_state.controller.set_program_file(program_name):
                             success, msg = st.session_state.controller.load_program()
-                            
+
                             if success:
                                 st.session_state.current_program = program_name
                                 st.session_state.status_message = f'<p class="status-success">✅ Loaded: {program_name}</p>'

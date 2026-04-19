@@ -14,8 +14,12 @@
 # ============================================
 # Home and Safe Positions
 # ============================================
-joint Home 0 -90 90 0 90 0
-joint Upright 0.0 -90.0 0.0 -90.0 -90.0 0.0
+# joint Home 0 -90 90 0 90 0
+# pose Home 0.5 0 0.2 0.0 1.0 0.0 0.0
+
+joint Home -12.6 -80.2 115.3 -125.1 -90 -102.6
+
+joint Upright 0.0 -90.0 0.0 -90.0 90.0 0.0
 joint Stowed 0.0 -134.6 119.7 -165.0 -90.0 0.0
 
 # ============================================
@@ -69,12 +73,15 @@ joint Drop_Position_Basket 21 -41 41 62 91 5
 # ============================================
 # Isaac Sim based Positions (for sorting cubes)
 # ============================================
-pose cube_pick_position 0.69 -0.24 0.1 0.0 1.0 0.0 0.0
-pose blue_basket_drop_position 0.73 0.46 0.3 0 1 0 0
+
+#pose blue_basket_drop_position 0.5 -0.5 0.2 0.0 1.0 0.0 0.0
+
+joint blue_basket_drop_position -53.9 -55 78.3 -113.3 -90 -143.9 
+
 
 # Isaac Sim cuboid pick poses (auto-generated)
-pose cuboid_red 0.93698 -0.04790 0.1 0.0 1.0 0.0 0.0
-pose cuboid_green 0.97930 0.11237 0.1 0.0 1.0 0.0 0.0
-pose cuboid_blue 0.59709 0.28489 0.1 0.0 1.0 0.0 0.0
-pose cuboid_yellow 0.93057 0.16736 0.1 0.0 1.0 0.0 0.0
-pose cuboid_orange 0.61406 -0.04076 0.1 0.0 1.0 0.0 0.0
+pose cuboid_red 0.40992 -0.22812 0.1 0.0 1.0 0.0 0.0
+pose cuboid_green 0.59253 0.11036 0.1 0.0 1.0 0.0 0.0
+pose cuboid_blue 0.57928 0.28042 0.1 0.0 1.0 0.0 0.0
+pose cuboid_yellow 0.46849 -0.11508 0.1 0.0 1.0 0.0 0.0
+pose cuboid_orange 0.41546 -0.18144 0.1 0.0 1.0 0.0 0.0

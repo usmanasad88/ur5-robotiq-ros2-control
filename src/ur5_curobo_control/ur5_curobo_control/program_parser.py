@@ -8,6 +8,10 @@ Parses program files with robot instructions like:
   - movetonamed(PositionName)                # Named position from config
   - moverelative(direction, distance)         # Relative Cartesian move
   - runprogram(filename.prog)                 # Execute another .prog file
+  - runprogram(filename.prog, arg1, arg2)    # Sub-program with positional args
+  - runprogram(filename.prog, key=value)     # Sub-program with keyword args
+  - name[arg1, arg2]                          # Bracket call form (sub-program with args)
+  - name[key1=val1, key2=val2]               # Bracket call form with keyword args
   - wait(seconds)
   - opengripper
   - closegripper
@@ -83,6 +87,10 @@ class RobotInstruction:
     relative_move: Optional[Tuple[Union[str, List[float]], float, str]] = None
     # Sub-program filename (for runprogram)
     sub_program: Optional[str] = None
+    # Sub-program positional arguments (raw string values, resolved by executor)
+    sub_program_args_positional: Optional[List[str]] = None
+    # Sub-program keyword arguments (raw string values)
+    sub_program_args_keyword: Optional[dict] = None
     # Condition string (for IF instructions, evaluated at runtime)
     condition: Optional[str] = None
     # Condition parameters (parsed from the condition string)
@@ -102,6 +110,112 @@ class RobotInstruction:
     joint_delta: Optional[List[float]] = None  # [d1,d2,d3,d4,d5,d6] in radians
     # Step time for SET_STEP_TIME instruction
     step_time: Optional[float] = None  # seconds per delta step
+
+
+# Module-level helpers for templated programs (sub-program calls with arguments).
+
+_TEMPLATE_TOKEN_RE = re.compile(r'\{(\w+)\}')
+_ARGS_HEADER_RE = re.compile(r'^\s*#\s*args\s*:\s*(.+?)\s*$', re.IGNORECASE)
+
+
+def _parse_call_args(args_blob: str) -> Tuple[List[str], dict]:
+    """Parse a comma-separated arg list into (positional, keyword).
+
+    Strips surrounding single/double quotes and whitespace from each value.
+    A keyword arg must be `key=value`; positional args must precede keyword args.
+    """
+    positional: List[str] = []
+    keyword: dict = {}
+    if not args_blob or not args_blob.strip():
+        return positional, keyword
+    for raw in args_blob.split(','):
+        part = raw.strip()
+        if not part:
+            continue
+        if '=' in part:
+            k, v = part.split('=', 1)
+            keyword[k.strip()] = v.strip().strip("\"'")
+        else:
+            if keyword:
+                # Positional after keyword: skip silently to avoid partial bind
+                continue
+            positional.append(part.strip("\"'"))
+    return positional, keyword
+
+
+def read_program_arg_names(filepath: str) -> List[str]:
+    """Read the declared arg names from a program file's `# args: a, b` header.
+
+    The header may appear anywhere in the leading comment block (before the first
+    non-comment line). Returns [] if no header is declared.
+    """
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                m = _ARGS_HEADER_RE.match(stripped)
+                if m:
+                    return [a.strip() for a in m.group(1).split(',') if a.strip()]
+                if not stripped.startswith('#'):
+                    return []
+    except OSError:
+        return []
+    return []
+
+
+def substitute_template(text: str, args: dict) -> Tuple[str, List[str]]:
+    """Substitute {name} tokens in `text` with values from `args`.
+
+    Returns (substituted_text, missing_names). Tokens whose name is not in `args`
+    are left untouched and recorded in `missing_names`.
+    """
+    missing: List[str] = []
+
+    def repl(match: 're.Match[str]') -> str:
+        name = match.group(1)
+        if name in args:
+            return str(args[name])
+        missing.append(name)
+        return match.group(0)
+
+    return _TEMPLATE_TOKEN_RE.sub(repl, text), missing
+
+
+def bind_program_args(
+    arg_names: List[str],
+    positional: Optional[List[str]],
+    keyword: Optional[dict],
+) -> Tuple[dict, List[str]]:
+    """Bind caller positional+keyword args against declared arg names.
+
+    Returns (bound_dict, errors). Unknown keyword args and missing required args
+    are reported as errors. Extra positional args are silently ignored when the
+    declared list is empty (back-compat for non-templated programs).
+    """
+    positional = positional or []
+    keyword = keyword or {}
+    errors: List[str] = []
+
+    if not arg_names:
+        # No declared args: still expose any keyword args directly so a program
+        # with bare {tokens} (no header) can still be substituted by the caller.
+        return dict(keyword), errors
+
+    bound: dict = {}
+    for i, name in enumerate(arg_names):
+        if i < len(positional):
+            bound[name] = positional[i]
+        elif name in keyword:
+            bound[name] = keyword[name]
+        else:
+            errors.append(f"missing required arg '{name}'")
+
+    unknown = [k for k in keyword if k not in arg_names]
+    if unknown:
+        errors.append(f"unknown keyword arg(s): {', '.join(unknown)}")
+    return bound, errors
 
 
 class ProgramParser:
@@ -156,9 +270,21 @@ class ProgramParser:
     )
     
     RUN_PROGRAM_PATTERN = re.compile(
-        r'runprogram\s*\(\s*([\w./-]+)\s*\)',
+        r'runprogram\s*\(\s*([\w./-]+)\s*(?:,\s*(.*?)\s*)?\)',
         re.IGNORECASE
     )
+
+    # Bracket call form: name[arg1, arg2] or name[key=val, ...] or name[]
+    # The leading identifier must not collide with built-in keywords (if/else/endif).
+    BRACKET_CALL_PATTERN = re.compile(
+        r'^([a-zA-Z_]\w*)\s*\[([^\]]*)\]\s*$'
+    )
+    _BRACKET_CALL_RESERVED = {
+        'if', 'else', 'endif', 'movetopose', 'movetojoint', 'movetonamed',
+        'moverelative', 'runprogram', 'wait', 'gripper', 'opengripper',
+        'closegripper', 'set_speed', 'force_mode', 'force_mode_stop', 'movel',
+        'jointdelta', 'set_step_time',
+    }
 
     # Force mode patterns
     # force_mode(axes, wrench)  or  force_mode(axes, wrench, speed_limit)
@@ -522,16 +648,38 @@ class ProgramParser:
                 self.errors.append(f"Line {line_num}: Failed to parse set_step_time: {e}")
                 return None
 
-        # Check for runprogram(filename)
+        # Check for runprogram(filename) or runprogram(filename, args...)
         match = self.RUN_PROGRAM_PATTERN.search(line)
         if match:
             filename = match.group(1)
+            args_blob = match.group(2)
+            positional, keyword = _parse_call_args(args_blob) if args_blob else ([], {})
             return RobotInstruction(
                 type=InstructionType.RUN_PROGRAM,
                 line_number=line_num,
                 raw_line=line,
-                sub_program=filename
+                sub_program=filename,
+                sub_program_args_positional=positional or None,
+                sub_program_args_keyword=keyword or None,
             )
+
+        # Check for bracket call form: name[arg1, arg2] or name[key=val, ...]
+        match = self.BRACKET_CALL_PATTERN.match(line)
+        if match:
+            name = match.group(1)
+            if name.lower() not in self._BRACKET_CALL_RESERVED:
+                args_blob = match.group(2)
+                positional, keyword = _parse_call_args(args_blob)
+                # Treat the name as a program file (caller can omit .prog)
+                filename = name if name.endswith('.prog') else f"{name}.prog"
+                return RobotInstruction(
+                    type=InstructionType.RUN_PROGRAM,
+                    line_number=line_num,
+                    raw_line=line,
+                    sub_program=filename,
+                    sub_program_args_positional=positional or None,
+                    sub_program_args_keyword=keyword or None,
+                )
         
         # Check for force_mode_stop() - must check before force_mode()
         if self.FORCE_MODE_STOP_PATTERN.search(line):

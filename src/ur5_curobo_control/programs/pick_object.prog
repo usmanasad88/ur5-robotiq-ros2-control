@@ -1,0 +1,41 @@
+# Pick a named object and return to a safe position.
+#
+# Usage:
+#   pick_object[ObjectName, SafeName]
+#   pick_object[object=ObjectName, safe=SafeName]
+#
+# Behaviour:
+#   1. If not already near the safe position, move there first.
+#   2. Open the gripper.
+#   3. Approach the object from above (15 cm above its named pose).
+#   4. Move to the object pose and close the gripper.
+#   5. Lift back up to the approach height and return to the safe position.
+# args: object, safe
+
+set_speed(0.5)
+
+if not_near({safe}, 0.15)
+  movetonamed({safe})
+  wait(0.5)
+endif
+
+if gripper_closed
+  opengripper
+  wait(0.5)
+endif
+
+moverelative({object}, up, 0.15)
+wait(0.3)
+
+movetonamed({object})
+wait(0.3)
+
+closegripper
+wait(1.0)
+
+moverelative({object}, up, 0.15)
+wait(0.3)
+
+set_speed(0.3)
+movetonamed({safe})
+wait(0.5)

@@ -73,12 +73,14 @@ except ImportError as exc:
 
 # Named-position parser (from the ur5_curobo_control package)
 try:
-    from ur5_curobo_control.program_parser import NamedPositionsParser, PositionType
+    from ur5_curobo_control.program_parser import (
+        NamedPositionsParser, PositionType, read_program_arg_names,
+    )
 except ImportError:
     # Fallback: import directly from source tree
     workspace_root = Path(__file__).resolve().parent
     sys.path.insert(0, str(workspace_root / "src/ur5_curobo_control/ur5_curobo_control"))
-    from program_parser import NamedPositionsParser, PositionType
+    from program_parser import NamedPositionsParser, PositionType, read_program_arg_names
 
 import psutil
 
@@ -206,9 +208,13 @@ class ROSBridge:
         res = self._call_service(self.cli_set_params, req)
         return res is not None and res.results[0].successful
 
-    def load_program(self, program_name: str):
+    def load_program(self, program_name: str, args: dict | None = None):
         if not self.set_parameter("program_file", program_name, ParameterType.PARAMETER_STRING):
             return False, "Failed to set program_file parameter"
+        # Always set program_args (empty string clears any prior args).
+        args_json = json.dumps(args) if args else ""
+        if not self.set_parameter("program_args", args_json, ParameterType.PARAMETER_STRING):
+            return False, "Failed to set program_args parameter"
         res = self._call_service(self.cli_load, Trigger.Request())
         if res is None:
             return False, "load_program service timeout"
@@ -417,16 +423,17 @@ WORKSPACE_ROOT = Path(__file__).resolve().parent
 
 
 def _programs_dir() -> Path:
-    d = WORKSPACE_ROOT / "install/ur5_curobo_control/share/ur5_curobo_control/programs"
+    # Prefer the source tree so edits/new programs take effect without a build.
+    d = WORKSPACE_ROOT / "src/ur5_curobo_control/programs"
     if not d.exists():
-        d = WORKSPACE_ROOT / "src/ur5_curobo_control/programs"
+        d = WORKSPACE_ROOT / "install/ur5_curobo_control/share/ur5_curobo_control/programs"
     return d
 
 
 def _named_positions_file() -> Path | None:
     for rel in [
-        "install/ur5_curobo_control/share/ur5_curobo_control/config/named_positions.txt",
         "src/ur5_curobo_control/config/named_positions.txt",
+        "install/ur5_curobo_control/share/ur5_curobo_control/config/named_positions.txt",
     ]:
         p = WORKSPACE_ROOT / rel
         if p.exists():
@@ -463,6 +470,7 @@ def get_available_commands() -> dict[str, Any]:
             commands["programs"].append({
                 "name": p.name,
                 "description": _read_description(p),
+                "args": read_program_arg_names(str(p)),
             })
 
     # Named positions
@@ -549,40 +557,50 @@ def api_status():
 
 @app.route("/api/program/execute", methods=["POST"])
 def api_program_execute():
-    """Load and execute a program.
+    """Load and execute a program, optionally with template args.
 
     Body: {"program": "pick_and_place_object.prog"}
+          {"program": "pick_object.prog",
+           "args": {"object": "Bottle_Hardener_Storage", "safe": "Home"}}
     """
     body = flask_request.get_json(silent=True) or {}
     prog = body.get("program")
     if not prog:
         return _err("Missing 'program' field")
+    args = body.get("args")
+    if args is not None and not isinstance(args, dict):
+        return _err("'args' must be an object mapping arg names to values")
     if bridge is None:
         return _err("ROS bridge not initialised", 503)
 
-    ok, msg = bridge.load_program(prog)
+    ok, msg = bridge.load_program(prog, args=args)
     if not ok:
         return _err(f"Load failed: {msg}")
     ok, msg = bridge.execute_program()
     if not ok:
         return _err(f"Execute failed: {msg}")
-    return _ok(msg, program=prog)
+    return _ok(msg, program=prog, args=args or {})
 
 
 @app.route("/api/program/load", methods=["POST"])
 def api_program_load():
-    """Load a program without executing.
+    """Load a program without executing, optionally with template args.
 
     Body: {"program": "inspect_object.prog"}
+          {"program": "place_object.prog",
+           "args": {"object": "Bottle_Hardener_Workplace", "safe": "Home"}}
     """
     body = flask_request.get_json(silent=True) or {}
     prog = body.get("program")
     if not prog:
         return _err("Missing 'program' field")
+    args = body.get("args")
+    if args is not None and not isinstance(args, dict):
+        return _err("'args' must be an object mapping arg names to values")
     if bridge is None:
         return _err("ROS bridge not initialised", 503)
-    ok, msg = bridge.load_program(prog)
-    return (_ok(msg, program=prog) if ok else _err(msg))
+    ok, msg = bridge.load_program(prog, args=args)
+    return (_ok(msg, program=prog, args=args or {}) if ok else _err(msg))
 
 
 @app.route("/api/program/pause", methods=["POST"])

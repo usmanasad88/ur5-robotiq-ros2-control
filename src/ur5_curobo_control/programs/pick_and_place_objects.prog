@@ -1,0 +1,63 @@
+# Pick a named object and place it at a named destination, with a safe
+# home position used as the approach/retreat between phases.
+#
+# Usage:
+#   pick_and_place_objects[InitialName, HomeName, FinalName]
+#   pick_and_place_objects[initial=InitialName, home=HomeName, final=FinalName]
+#
+# Behaviour:
+#   1. If not already near home, move there.
+#   2. Open gripper if closed.
+#   3. Approach the pick object from 15 cm above, descend, close gripper, lift.
+#   4. Return to home.
+#   5. Approach the place target from 15 cm above, descend, open gripper, lift.
+#   6. Return to home.
+# args: initial, home, final
+
+set_speed(0.5)
+
+if not_near({home}, 0.15)
+  movetonamed({home})
+  wait(0.5)
+endif
+
+if gripper_closed
+  opengripper
+  wait(0.5)
+endif
+
+# --- Pick phase ---
+moverelative({initial}, up, 0.15)
+wait(0.3)
+
+movetonamed({initial})
+wait(0.3)
+
+closegripper
+wait(1.0)
+
+moverelative({initial}, up, 0.15)
+wait(0.3)
+
+# set_speed(0.3)
+# movetonamed({home})
+# wait(0.5)
+
+# --- Place phase ---
+set_speed(0.5)
+
+moverelative({final}, up, 0.15)
+wait(0.3)
+
+movetonamed({final})
+wait(0.3)
+
+opengripper
+wait(0.5)
+
+moverelative({final}, up, 0.15)
+wait(0.3)
+
+set_speed(0.3)
+movetonamed({home})
+wait(0.5)
