@@ -27,8 +27,17 @@ Parses program files with robot instructions like:
     if gripper_open / if gripper_closed
     if near(PositionName) / if near(PositionName, tolerance)
     if not_near(PositionName) / if not_near(PositionName, tolerance)
+    if equals(A, B) / if not_equals(A, B)     # case-insensitive string compare
     else
     endif
+
+  Runtime variables:
+    set NAME = random(MIN, MAX)    # sample a float in [MIN, MAX]
+    set NAME = VALUE               # assign a literal float
+    # Reference a variable as the distance arg of moverelative:
+    moverelative(ref_pos, direction, $NAME)
+    moverelative(ref_pos, [x,y,z], $NAME)
+    # Signed distances are also allowed (negative flips the direction).
 
 Note: Joint angles in program files and named_positions.txt are specified
       in DEGREES and automatically converted to radians by the parser.
@@ -59,6 +68,7 @@ class InstructionType(Enum):
     MOVEL = auto()
     JOINT_DELTA = auto()
     SET_STEP_TIME = auto()
+    SET_VAR = auto()
     COMMENT = auto()
     UNKNOWN = auto()
 
@@ -110,6 +120,17 @@ class RobotInstruction:
     joint_delta: Optional[List[float]] = None  # [d1,d2,d3,d4,d5,d6] in radians
     # Step time for SET_STEP_TIME instruction
     step_time: Optional[float] = None  # seconds per delta step
+    # Runtime variable (SET_VAR): `set NAME = random(MIN, MAX)` or `set NAME = VALUE`
+    var_name: Optional[str] = None
+    var_random_min: Optional[float] = None
+    var_random_max: Optional[float] = None
+    var_literal: Optional[float] = None
+    # For moverelative: name of a runtime variable to use as the distance
+    # (resolved at execution time). Mutually exclusive with a literal distance.
+    distance_var: Optional[str] = None
+    # For IF equals/not_equals conditions: the two operands to compare as strings
+    condition_a: Optional[str] = None
+    condition_b: Optional[str] = None
 
 
 # Module-level helpers for templated programs (sub-program calls with arguments).
@@ -260,12 +281,29 @@ class ProgramParser:
     )
     
     MOVE_RELATIVE_NAMED_DIR_PATTERN = re.compile(
-        r'moverelative\s*\(\s*(?:([a-zA-Z_]\w*|[\"\'][a-zA-Z_]\w*[\"\'])\s*,\s*)?([a-zA-Z_]\w*)\s*(?:,\s*([0-9.]+))?\s*\)',
+        r'moverelative\s*\(\s*(?:([a-zA-Z_]\w*|[\"\'][a-zA-Z_]\w*[\"\'])\s*,\s*)?([a-zA-Z_]\w*)\s*(?:,\s*([-+]?[0-9.]+|\$\w+))?\s*\)',
         re.IGNORECASE
     )
 
     MOVE_RELATIVE_VECTOR_PATTERN = re.compile(
-        r'moverelative\s*\(\s*(?:([a-zA-Z_]\w*|[\"\'][a-zA-Z_]\w*[\"\'])\s*,\s*)?\[([^\]]+)\]\s*(?:,\s*([0-9.]+))?\s*\)',
+        r'moverelative\s*\(\s*(?:([a-zA-Z_]\w*|[\"\'][a-zA-Z_]\w*[\"\'])\s*,\s*)?\[([^\]]+)\]\s*(?:,\s*([-+]?[0-9.]+|\$\w+))?\s*\)',
+        re.IGNORECASE
+    )
+
+    # set NAME = random(MIN, MAX)   — sample a new float into runtime variable NAME
+    SET_VAR_RANDOM_PATTERN = re.compile(
+        r'^set\s+(\w+)\s*=\s*random\s*\(\s*([-+]?[0-9.]+)\s*,\s*([-+]?[0-9.]+)\s*\)\s*$',
+        re.IGNORECASE
+    )
+    # set NAME = VALUE              — assign a literal float to runtime variable NAME
+    SET_VAR_LITERAL_PATTERN = re.compile(
+        r'^set\s+(\w+)\s*=\s*([-+]?[0-9.]+)\s*$',
+        re.IGNORECASE
+    )
+
+    # if equals(A, B) / if not_equals(A, B)  — string comparison (case-insensitive)
+    IF_EQUALS_PATTERN = re.compile(
+        r'^if\s+(equals|not_equals)\s*\(\s*([^,)]+?)\s*,\s*([^)]+?)\s*\)\s*$',
         re.IGNORECASE
     )
     
@@ -283,7 +321,7 @@ class ProgramParser:
         'if', 'else', 'endif', 'movetopose', 'movetojoint', 'movetonamed',
         'moverelative', 'runprogram', 'wait', 'gripper', 'opengripper',
         'closegripper', 'set_speed', 'force_mode', 'force_mode_stop', 'movel',
-        'jointdelta', 'set_step_time',
+        'jointdelta', 'set_step_time', 'set',
     }
 
     # Force mode patterns
@@ -517,7 +555,15 @@ class ProgramParser:
         if match:
             ref_pos = match.group(1).strip(' "\'') if match.group(1) else "current"
             direction = match.group(2).lower()
-            distance = float(match.group(3)) if match.group(3) else 0.05  # default 5cm
+            distance_tok = match.group(3)
+            distance_var = None
+            if distance_tok is None:
+                distance = 0.05  # default 5cm
+            elif distance_tok.startswith('$'):
+                distance = 0.0
+                distance_var = distance_tok[1:]
+            else:
+                distance = float(distance_tok)
             valid_directions = ['left', 'right', 'forward', 'back', 'up', 'down']
             if direction not in valid_directions:
                 self.errors.append(f"Line {line_num}: Invalid direction '{direction}'. Use: {', '.join(valid_directions)}")
@@ -526,7 +572,8 @@ class ProgramParser:
                 type=InstructionType.MOVE_RELATIVE,
                 line_number=line_num,
                 raw_line=line,
-                relative_move=(direction, distance, ref_pos)
+                relative_move=(direction, distance, ref_pos),
+                distance_var=distance_var,
             )
 
         # Check for moverelative([x,y,z], distance) or moverelative(ref_pos, [x,y,z], distance)
@@ -538,7 +585,15 @@ class ProgramParser:
                 if len(vec) != 3:
                     self.errors.append(f"Line {line_num}: moverelative vector must have 3 values [x,y,z]")
                     return None
-                distance = float(match.group(3)) if match.group(3) else 0.05
+                distance_tok = match.group(3)
+                distance_var = None
+                if distance_tok is None:
+                    distance = 0.05
+                elif distance_tok.startswith('$'):
+                    distance = 0.0
+                    distance_var = distance_tok[1:]
+                else:
+                    distance = float(distance_tok)
                 # Normalize the vector
                 import math
                 mag = math.sqrt(sum(v*v for v in vec))
@@ -550,7 +605,8 @@ class ProgramParser:
                     type=InstructionType.MOVE_RELATIVE,
                     line_number=line_num,
                     raw_line=line,
-                    relative_move=(direction, distance, ref_pos)
+                    relative_move=(direction, distance, ref_pos),
+                    distance_var=distance_var,
                 )
             except ValueError as e:
                 self.errors.append(f"Line {line_num}: Failed to parse moverelative vector: {e}")
@@ -710,6 +766,58 @@ class ProgramParser:
             except ValueError as e:
                 self.errors.append(f"Line {line_num}: Failed to parse force_mode: {e}")
                 return None
+
+        # Check for set NAME = random(MIN, MAX)
+        match = self.SET_VAR_RANDOM_PATTERN.match(line)
+        if match:
+            try:
+                name = match.group(1)
+                lo = float(match.group(2))
+                hi = float(match.group(3))
+                if hi < lo:
+                    lo, hi = hi, lo
+                return RobotInstruction(
+                    type=InstructionType.SET_VAR,
+                    line_number=line_num,
+                    raw_line=line,
+                    var_name=name,
+                    var_random_min=lo,
+                    var_random_max=hi,
+                )
+            except ValueError as e:
+                self.errors.append(f"Line {line_num}: Failed to parse set random: {e}")
+                return None
+
+        # Check for set NAME = VALUE (literal)
+        match = self.SET_VAR_LITERAL_PATTERN.match(line)
+        if match:
+            try:
+                return RobotInstruction(
+                    type=InstructionType.SET_VAR,
+                    line_number=line_num,
+                    raw_line=line,
+                    var_name=match.group(1),
+                    var_literal=float(match.group(2)),
+                )
+            except ValueError as e:
+                self.errors.append(f"Line {line_num}: Failed to parse set literal: {e}")
+                return None
+
+        # Check for conditional: if equals(A, B) / if not_equals(A, B)
+        match = self.IF_EQUALS_PATTERN.match(line)
+        if match:
+            cond_type = match.group(1).lower()
+            a = match.group(2).strip().strip('"\'')
+            b = match.group(3).strip().strip('"\'')
+            return RobotInstruction(
+                type=InstructionType.IF,
+                line_number=line_num,
+                raw_line=line,
+                condition=line,
+                condition_type=cond_type,
+                condition_a=a,
+                condition_b=b,
+            )
 
         # Check for conditional: if gripper_open / if gripper_closed
         match = self.IF_GRIPPER_PATTERN.match(line)

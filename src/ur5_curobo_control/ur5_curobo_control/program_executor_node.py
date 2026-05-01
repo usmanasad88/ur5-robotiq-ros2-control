@@ -33,6 +33,7 @@ import time
 from scipy.spatial.transform import Rotation
 import os
 import sys
+import random as _random
 import threading
 import yaml
 from ament_index_python.packages import get_package_share_directory
@@ -217,6 +218,11 @@ class UR5ProgramExecutorNode(Node):
         self.max_sub_program_depth = 10
         self.current_sub_program_depth = 0
 
+        # Runtime variables populated by `set NAME = ...` instructions.
+        # Cleared when a new top-level program is loaded; persists across
+        # sub-program calls (which are flattened into the parent program).
+        self.runtime_vars: dict = {}
+
         # Teleop state (SpaceMouse jog control)
         self._teleop_replan_timer = None
         self._teleop_sub = None
@@ -344,10 +350,11 @@ class UR5ProgramExecutorNode(Node):
 
             if errors:
                 self.get_logger().warn(f"Parse warnings: {errors}")
-            
+
             self.current_program_name = os.path.basename(program_file)
             self.current_instruction_idx = 0
-            
+            self.runtime_vars = {}
+
             self.get_logger().info(f"Auto-loaded program: {self.current_program_name} ({len(self.current_program)} instructions)")
             
             # If auto_execute is enabled, start a timer to execute after we get joint states
@@ -930,6 +937,7 @@ class UR5ProgramExecutorNode(Node):
 
             self.current_program_name = os.path.basename(program_file)
             self.current_instruction_idx = 0
+            self.runtime_vars = {}
             self.state = ExecutorState.IDLE
 
             args_desc = f" (args: {args})" if args else ""
@@ -1207,8 +1215,7 @@ class UR5ProgramExecutorNode(Node):
                 base_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
                 base_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
             else:
-                if self.named_positions is None:
-                    self._load_named_positions()
+                self._load_named_positions()
                 if self.named_positions is None:
                     response.success = False
                     response.message = f"moverelative: failed to load named positions"
@@ -1636,6 +1643,8 @@ class UR5ProgramExecutorNode(Node):
                 self.step_time = instruction.step_time
                 self.get_logger().info(f"Step time set to {self.step_time} s")
                 return True
+            elif instruction.type == InstructionType.SET_VAR:
+                return self.execute_set_var(instruction)
             elif instruction.type in (InstructionType.IF, InstructionType.ELSE, InstructionType.ENDIF):
                 # Conditionals are handled by execution_step, not here
                 return True
@@ -1997,8 +2006,9 @@ class UR5ProgramExecutorNode(Node):
         msg.data = urscript
         self._urscript_pub.publish(msg)
 
-        # Wait for the move to complete (estimate from distance and speed)
-        move_duration = distance / speed + 0.5  # extra time for accel/decel
+        # Wait for the move to complete (estimate from distance and speed).
+        # Distance can be signed (negative = reverse direction) — use magnitude.
+        move_duration = abs(distance) / speed + 0.5  # extra time for accel/decel
         self.get_logger().info(f"movel: waiting {move_duration:.1f}s for completion")
         if self._stop_event.wait(timeout=move_duration):
             self.get_logger().info("movel interrupted by stop/pause")
@@ -2149,12 +2159,10 @@ class UR5ProgramExecutorNode(Node):
             self.get_logger().error("movetonamed: no position name specified")
             return False
         
+        # Always reload so externally-updated positions are picked up
+        self._load_named_positions()
         pos = self.named_positions.get(name.lower())
-        if pos is None:
-            # Reload in case positions were added at runtime
-            self._load_named_positions()
-            pos = self.named_positions.get(name.lower())
-        
+
         if pos is None:
             self.get_logger().error(f"movetonamed: named position '{name}' not found")
             return False
@@ -2184,6 +2192,26 @@ class UR5ProgramExecutorNode(Node):
         self.get_logger().error(f"movetonamed: unknown position type for '{name}'")
         return False
     
+    def execute_set_var(self, instruction: RobotInstruction) -> bool:
+        """Assign a runtime variable from a SET_VAR instruction."""
+        name = instruction.var_name
+        if not name:
+            self.get_logger().error("set: missing variable name")
+            return False
+        if instruction.var_random_min is not None and instruction.var_random_max is not None:
+            value = _random.uniform(instruction.var_random_min, instruction.var_random_max)
+            self.get_logger().info(
+                f"set {name} = random({instruction.var_random_min}, {instruction.var_random_max}) -> {value:.4f}"
+            )
+        elif instruction.var_literal is not None:
+            value = instruction.var_literal
+            self.get_logger().info(f"set {name} = {value}")
+        else:
+            self.get_logger().error(f"set {name}: no value specified")
+            return False
+        self.runtime_vars[name] = float(value)
+        return True
+
     def execute_move_relative_instruction(self, instruction: RobotInstruction) -> bool:
         """Execute a relative Cartesian move from a program instruction.
 
@@ -2200,6 +2228,19 @@ class UR5ProgramExecutorNode(Node):
             return False
 
         direction_or_vector, distance, ref_pos_name = instruction.relative_move
+
+        # Resolve $NAME distance reference from runtime_vars (overrides literal).
+        if instruction.distance_var:
+            if instruction.distance_var not in self.runtime_vars:
+                self.get_logger().error(
+                    f"moverelative: runtime variable '${instruction.distance_var}' is not set "
+                    f"(use `set {instruction.distance_var} = ...` before this instruction)"
+                )
+                return False
+            distance = float(self.runtime_vars[instruction.distance_var])
+            self.get_logger().info(
+                f"moverelative: distance resolved from ${instruction.distance_var} = {distance:.4f} m"
+            )
 
         if isinstance(direction_or_vector, list):
             direction_vec = direction_or_vector
@@ -2260,8 +2301,7 @@ class UR5ProgramExecutorNode(Node):
                 base_pos = kin_state.ee_position.squeeze().cpu().numpy().tolist()
                 base_quat = kin_state.ee_quaternion.squeeze().cpu().numpy().tolist()
             else:
-                if self.named_positions is None:
-                    self._load_named_positions()
+                self._load_named_positions()
                 if self.named_positions is None:
                     self.get_logger().error(f"moverelative: failed to load named positions")
                     return False
@@ -2486,6 +2526,14 @@ class UR5ProgramExecutorNode(Node):
             self.get_logger().info(f"Condition gripper_closed: gripper_state={self.gripper_state:.2f} => {result}")
             return result
         
+        elif cond_type in ('equals', 'not_equals'):
+            a = instruction.condition_a or ""
+            b = instruction.condition_b or ""
+            is_equal = a.strip().lower() == b.strip().lower()
+            result = is_equal if cond_type == 'equals' else not is_equal
+            self.get_logger().info(f"Condition {cond_type}({a!r}, {b!r}) => {result}")
+            return result
+
         elif cond_type in ('near', 'not_near'):
             target_name = instruction.condition_target
             tolerance = instruction.condition_tolerance if instruction.condition_tolerance is not None else 0.1  # default 0.1 rad (~5.7 deg)
@@ -2494,10 +2542,8 @@ class UR5ProgramExecutorNode(Node):
                 self.get_logger().error(f"Condition {cond_type}: no target position name")
                 return False
             
+            self._load_named_positions()
             pos = self.named_positions.get(target_name.lower())
-            if pos is None:
-                self._load_named_positions()
-                pos = self.named_positions.get(target_name.lower())
             
             if pos is None:
                 self.get_logger().error(f"Condition {cond_type}: named position '{target_name}' not found")

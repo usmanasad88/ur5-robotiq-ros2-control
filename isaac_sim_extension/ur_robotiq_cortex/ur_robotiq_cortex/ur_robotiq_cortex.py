@@ -348,7 +348,7 @@ class URRobotiqCortex(CortexBase):
 
         # Object specifications from Scene_update_locations1.usda
         objects = [
-            ("basket_blue.glb", "basket_blue", [0.53, -0.5, -0.02518], [0.3, 0.3, 0.3], [0.70710677, 0, 0, -0.70710677]),
+            ("basket_blue.glb", "basket_blue", [0.53, -0.5, -0.02], [0.3, 0.3, 0.3], [0.70710677, 0, 0, -0.70710677]),
             # For the balls, x may be between 0.55 to 1.05 ; y may be between -0.32 to +0.30
             # ("blue_ball.glb", "blue_ball", [0.69, -0.32, -0.05], [0.06, 0.06, 0.06], [1, 0, 0, 0]),
             # ("punch.glb", "punch", [0.60, -0.10, -0.05], [0.1, 0.1, 0.1], [0.70710677, 0, 0, -0.70710677]),
@@ -363,8 +363,8 @@ class URRobotiqCortex(CortexBase):
             # ("scale.usd", "scale", [0.9796966110997245, 0.47066618528330484, -0.050753143391285616], [0.2, 0.2, 0.2], [0.70710677, 0, 0, 0.70710677]),
 
             ("chair.glb", "chair", [2.654924188733815, -0.7996137486341647, -0.4433299999999999], [0.6, 0.6, 0.6], [0.6846738, 0, 0, -0.72884965]),
-            ("table.glb", "table", [0.65, -0.04560571909652668, -0.41187710630742197], [1.22, 1.22, 1.22], [0.70710677, 0, 0, -0.70710677]),           
-            ("table.glb", "table_01", [-0.005166622984513063, -0.9581998617755373, -0.41188], [1.22, 1.22, 1.22], [6.123234e-17, 0, 0, 1]),
+            ("table.glb", "table", [0.52883, -0.11806, -0.49688], [1.22, 1.27, 1.53], [0.70710677, 0, 0, -0.70710677]),           
+            ("table.glb", "table_01", [-0.08974, -1.03653, -0.49688], [1.22, 1.27, 1.53], [0, 0, 0, 1]),
             ("chair.glb", "chair_01", [1.5211308724811525, 0.11280207853649299, -0.4129617690059313], [0.7, 0.7, 0.7], [0.6846738, 0, 0, -0.72884965]),
             ("chair.glb", "chair_02", [0.5518825573150291, -1.4596548944824432, -0.44333000000000217], [0.7, 0.7, 0.7], [0.021866286, 0, 0, -0.9997609]),
             ("chair.glb", "chair_03", [-0.030057869207804636, -1.4888103302584828, -0.44332999999999656], [0.7, 0.7, 0.7], [0.021866286, 0, 0, -0.9997609]),
@@ -544,7 +544,7 @@ class URRobotiqCortex(CortexBase):
                 trans_attr = ground_prim.GetAttribute("xformOp:translate")
                 if not trans_attr.IsValid():
                     trans_attr = ground_prim.CreateAttribute("xformOp:translate", Sdf.ValueTypeNames.Double3)
-                trans_attr.Set(Gf.Vec3d(0, 0, -0.7504923076056753))
+                trans_attr.Set(Gf.Vec3d(0, 0, -0.9271))
 
                 # Set orient (quaternion)
                 orient_attr = ground_prim.GetAttribute("xformOp:orient")
@@ -565,7 +565,7 @@ class URRobotiqCortex(CortexBase):
                 # Manually set the order list
                 order_attr.Set(["xformOp:translate", "xformOp:orient", "xformOp:scale"])
 
-                LOGGER("Added ground plane at z=-0.7504923076056753")
+                LOGGER("Added ground plane at z=-0.9271")
             else:
                 LOGGER("Could not create ground plane prim")
         except Exception as e:
@@ -816,7 +816,7 @@ class URRobotiqCortex(CortexBase):
         if named_pos_path is None or not self._cuboid_specs:
             LOGGER("named_positions.txt not found — skipping cuboid pose export")
             return
-        PICK_Z = 0.1
+        PICK_Z = 0.06
         PICK_QUAT = "0.0 1.0 0.0 0.0"
         try:
             lines = named_pos_path.read_text().splitlines()

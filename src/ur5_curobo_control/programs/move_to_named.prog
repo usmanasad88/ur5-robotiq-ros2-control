@@ -1,0 +1,6 @@
+# Move the robot to a named pose.
+# args: name
+
+set_speed(0.5)
+movetonamed({name})
+wait(0.5)

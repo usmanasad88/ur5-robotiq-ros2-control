@@ -39,6 +39,7 @@ import sys
 import json
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -507,11 +508,140 @@ def is_executor_running() -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Session logging
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Every POST request (the "intent") is appended to api_commands.jsonl, and a
+# background thread samples joint/gripper state into joint_states.jsonl at
+# STATE_SAMPLE_HZ.  Both share the same wall-clock so commands and state can
+# be correlated offline.
+#
+# Default location: recordings/session_<timestamp>/  next to this file.
+# Override with UR5_SESSION_DIR (full path) or UR5_RECORDINGS_DIR (parent dir).
+
+STATE_SAMPLE_HZ = 50.0
+
+session_dir: Path | None = None
+_cmd_log_path: Path | None = None
+_state_log_path: Path | None = None
+_cmd_log_lock = threading.Lock()
+_state_log_lock = threading.Lock()
+_session_t0: float = 0.0
+_state_sampler_thread: threading.Thread | None = None
+_state_sampler_stop = threading.Event()
+
+
+def _init_session_logging() -> None:
+    """Create the session directory and open the two JSONL files."""
+    global session_dir, _cmd_log_path, _state_log_path, _session_t0
+
+    explicit = os.environ.get("UR5_SESSION_DIR", "").strip()
+    if explicit:
+        session_dir = Path(explicit).expanduser()
+    else:
+        parent = Path(
+            os.environ.get("UR5_RECORDINGS_DIR", "").strip()
+            or (Path(__file__).resolve().parent / "recordings")
+        ).expanduser()
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_dir = parent / f"session_{ts}"
+
+    session_dir.mkdir(parents=True, exist_ok=True)
+    _cmd_log_path = session_dir / "api_commands.jsonl"
+    _state_log_path = session_dir / "joint_states.jsonl"
+    _session_t0 = time.time()
+
+    meta = {
+        "session_start": datetime.fromtimestamp(_session_t0).isoformat(),
+        "state_sample_hz": STATE_SAMPLE_HZ,
+        "use_fake_hardware": os.environ.get("USE_FAKE_HARDWARE", "false"),
+    }
+    (session_dir / "session_meta.json").write_text(json.dumps(meta, indent=2))
+
+
+def _state_sampler_loop() -> None:
+    """Background loop: sample joint/gripper state at STATE_SAMPLE_HZ."""
+    interval = 1.0 / STATE_SAMPLE_HZ
+    next_t = time.time()
+    while not _state_sampler_stop.is_set():
+        next_t += interval
+        if bridge is None:
+            time.sleep(interval)
+            continue
+        try:
+            entry = {
+                "ts": time.time(),
+                "elapsed_s": round(time.time() - _session_t0, 4),
+                "joint_state": bridge.get_joint_state_dict(),
+                "gripper_state": bridge.get_gripper_state_dict(),
+                "executor_state": getattr(bridge, "executor_state", None),
+                "current_program": getattr(bridge, "current_program_name", None),
+            }
+            line = json.dumps(entry, default=str)
+            with _state_log_lock, open(_state_log_path, "a") as f:
+                f.write(line + "\n")
+        except Exception as e:
+            print(f"[session-log] state sample failed: {e}")
+        sleep_for = next_t - time.time()
+        if sleep_for > 0:
+            _state_sampler_stop.wait(sleep_for)
+
+
+def _start_state_sampler() -> None:
+    global _state_sampler_thread
+    _state_sampler_stop.clear()
+    _state_sampler_thread = threading.Thread(
+        target=_state_sampler_loop, name="state-sampler", daemon=True
+    )
+    _state_sampler_thread.start()
+
+
+def _stop_state_sampler() -> None:
+    _state_sampler_stop.set()
+    if _state_sampler_thread is not None:
+        _state_sampler_thread.join(timeout=2.0)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Flask app
 # ═══════════════════════════════════════════════════════════════════════════
 
 app = Flask(__name__)
 bridge: ROSBridge | None = None
+
+
+@app.before_request
+def _log_request_start():
+    flask_request._t0 = time.perf_counter()
+
+
+@app.after_request
+def _log_request_end(response):
+    """Log every POST (the command + the response + state at completion)."""
+    if _cmd_log_path is None or flask_request.method != "POST":
+        return response
+    try:
+        body = flask_request.get_json(silent=True) or {}
+        entry = {
+            "ts": time.time(),
+            "elapsed_s": round(time.time() - _session_t0, 3),
+            "endpoint": flask_request.path,
+            "remote_addr": flask_request.remote_addr,
+            "request": body,
+            "status": response.status_code,
+            "response": response.get_json(silent=True),
+            "duration_ms": round((time.perf_counter() - getattr(flask_request, "_t0", time.perf_counter())) * 1000, 1),
+            "joint_state": bridge.get_joint_state_dict() if bridge else None,
+            "gripper_state": bridge.get_gripper_state_dict() if bridge else None,
+            "executor_state": getattr(bridge, "executor_state", None) if bridge else None,
+            "current_program": getattr(bridge, "current_program_name", None) if bridge else None,
+        }
+        line = json.dumps(entry, default=str)
+        with _cmd_log_lock, open(_cmd_log_path, "a") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        print(f"[session-log] command log failed: {e}")
+    return response
 
 
 def _ok(msg: str = "ok", **extra):
@@ -819,6 +949,7 @@ def main():
     parser.add_argument("--port", type=int, default=5050, help="HTTP port (default 5050)")
     parser.add_argument("--host", default="0.0.0.0", help="Bind address (default 0.0.0.0)")
     parser.add_argument("--no-ros", action="store_true", help="Run without ROS (dry-run / dev mode)")
+    parser.add_argument("--no-log", action="store_true", help="Disable session logging")
     args = parser.parse_args()
 
     use_fake = os.environ.get("USE_FAKE_HARDWARE", "false").lower() in ("true", "1", "yes")
@@ -828,6 +959,11 @@ def main():
         bridge = ROSBridge(use_fake=use_fake)
     else:
         print("⚠  Running without ROS 2 bridge (dry-run mode)")
+
+    if not args.no_log:
+        _init_session_logging()
+        _start_state_sampler()
+        print(f"📝 Session log: {session_dir}")
 
     print(f"\n{'='*50}")
     print(f"  UR5 External Control API")
@@ -840,6 +976,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        _stop_state_sampler()
         if bridge:
             bridge.shutdown()
         if ROS_AVAILABLE and rclpy.ok():
