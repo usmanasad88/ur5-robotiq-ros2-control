@@ -6,12 +6,18 @@ ROS 2 Follower behavior for UR10 with Robotiq gripper.
 Subscribes to /joint_states and mimics the joint angles using Curobo.
 """
 
+import os
 import sys
 import time
 import traceback
 import numpy as np
 from typing import Any, Dict, Optional, Tuple, List
 from collections import OrderedDict
+
+# Periodic per-step / per-callback chatter is gated by UR_ROS2_VERBOSE.
+# One-shot setup messages (init, gripper-mapping, state enter/exit) are always
+# printed. Set UR_ROS2_VERBOSE=1 to re-enable the per-step diagnostics.
+_VERBOSE = os.environ.get("UR_ROS2_VERBOSE", "0").lower() in ("1", "true", "yes", "on")
 
 # Mock setuptools_scm if missing to allow curobo import from source
 try:
@@ -173,7 +179,7 @@ class ROS2FollowerContext(DfRobotApiContext):
 
             # Log every 60th callback, or when joints change significantly
             changed = prev is not None and np.max(np.abs(self.latest_joint_state - prev)) > 0.01
-            if self._cb_count % 60 == 1 or changed:
+            if _VERBOSE and (self._cb_count % 60 == 1 or changed):
                 print(f"[ROS2 Follower] CB #{self._cb_count}: joints={[f'{v:.3f}' for v in self.latest_joint_state]}"
                       f"  changed={changed}")
 
@@ -196,7 +202,7 @@ class ROS2FollowerContext(DfRobotApiContext):
         if not hasattr(self, '_fast_apply_count'):
             self._fast_apply_count = 0
         self._fast_apply_count += 1
-        if self._fast_apply_count % 120 == 0:
+        if _VERBOSE and self._fast_apply_count % 120 == 0:
             gripper_dbg = f", gripper={self.latest_gripper_pos:.3f}" if self.latest_gripper_pos is not None else ""
             print(f"[ROS2 Follower] fast_apply #{self._fast_apply_count}: target={[f'{v:.3f}' for v in target_joints]}{gripper_dbg}")
 
@@ -275,7 +281,7 @@ class ROS2FollowerContext(DfRobotApiContext):
             if self._update_count % 60 == 1:
                 print("[ROS2 Follower] Warning: ROS2 node is None and could not be reinitialized")
 
-        if self._update_count % 120 == 0:
+        if _VERBOSE and self._update_count % 120 == 0:
             cb_count = getattr(self, '_cb_count', 0)
             print(f"[ROS2 Follower] update_from_ros #{self._update_count}, callbacks received: {cb_count}, "
                   f"latest_joint_state={'set' if self.latest_joint_state is not None else 'None'}")
@@ -534,7 +540,7 @@ class ROS2FollowerState(DfState):
 
     def step(self):
         self.step_count += 1
-        if self.step_count % 100 == 0:
+        if _VERBOSE and self.step_count % 100 == 0:
             print(f"[ROS2 Follower State] Step #{self.step_count}")
         try:
             self.context.update_from_ros()

@@ -37,9 +37,10 @@ import rclpy
 from rclpy.node import Node
 from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
 from rcl_interfaces.srv import SetParameters
-from std_msgs.msg import Float64MultiArray, Float64
+from std_msgs.msg import Float64MultiArray, Float64, Bool
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import JointState
+from geometry_msgs.msg import PoseStamped
 
 try:
     from oculus_reader.reader import OculusReader
@@ -260,6 +261,16 @@ class QuestServoTeleop(Node):
         self._vel_pub = self.create_publisher(
             Float64MultiArray, '/forward_velocity_controller/commands', 10)
         self._grip_pub = self.create_publisher(Float64, '/ur5/gripper_cmd', 10)
+        # Absolute controller pose in env frame, published every control tick
+        # regardless of grip state so consumers (e.g. Isaac Sim VR cursor) can
+        # follow the controller continuously. Frame is set/reset by the
+        # joystick-click recenter, the same one used internally by this node.
+        self._controller_pose_pub = self.create_publisher(
+            PoseStamped, '/quest/controller_pose', 10)
+        # Grip deadman state, published every tick. Use as the engagement
+        # signal for grab / release.
+        self._grip_held_pub = self.create_publisher(
+            Bool, '/quest/grip_held', 10)
 
         # ---- joint state subscriber ----
         self._js_lock    = threading.Lock()
@@ -455,6 +466,33 @@ class QuestServoTeleop(Node):
         grip_msg = Float64()
         grip_msg.data = float(np.clip(trig, 0.0, 1.0))
         self._grip_pub.publish(grip_msg)
+
+        # ---- absolute controller pose (always published, independent of grip) ----
+        # Same env-frame pose used internally for teleop; vr_to_global is only
+        # changed by the joystick-click recenter, so this stream is continuous
+        # across grip presses.
+        if self.cid in poses:
+            raw = np.asarray(poses[self.cid])
+            mat = self.global_to_env @ vr_to_global @ raw
+            ctrl_pos = self.spatial_coeff * mat[:3, 3]
+            ctrl_quat = rmat_to_quat(mat[:3, :3])
+
+            pose_msg = PoseStamped()
+            pose_msg.header.stamp = self.get_clock().now().to_msg()
+            pose_msg.header.frame_id = 'ur5_base_link'
+            pose_msg.pose.position.x = float(ctrl_pos[0])
+            pose_msg.pose.position.y = float(ctrl_pos[1])
+            pose_msg.pose.position.z = float(ctrl_pos[2])
+            pose_msg.pose.orientation.w = float(ctrl_quat[0])
+            pose_msg.pose.orientation.x = float(ctrl_quat[1])
+            pose_msg.pose.orientation.y = float(ctrl_quat[2])
+            pose_msg.pose.orientation.z = float(ctrl_quat[3])
+            self._controller_pose_pub.publish(pose_msg)
+
+        # ---- grip state (always published) ----
+        grip_state_msg = Bool()
+        grip_state_msg.data = bool(enabled)
+        self._grip_held_pub.publish(grip_state_msg)
 
         # ---- not enabled: send zero velocities ----
         if not enabled:

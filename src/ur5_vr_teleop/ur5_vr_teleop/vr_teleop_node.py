@@ -358,7 +358,7 @@ class VRTeleopNode(Node):
                 msg.droll = float(droll)
                 msg.dpitch = float(dpitch)
                 msg.dyaw = float(dyaw)
-                
+
                 self.publisher_.publish(msg)
             else:
                 if should_log:

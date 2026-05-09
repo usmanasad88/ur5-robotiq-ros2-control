@@ -85,8 +85,36 @@ joint blue_basket_drop_position -53.9 -55 78.3 -113.3 -90 -143.9
 # Isaac Sim cuboid pick poses (auto-generated)
 
 # Isaac Sim cuboid pick poses (auto-generated)
-pose cuboid_red 0.54931 -0.15794 0.06 0.0 1.0 0.0 0.0
-pose cuboid_green 0.55587 0.27816 0.06 0.0 1.0 0.0 0.0
-pose cuboid_blue 0.53352 0.26509 0.06 0.0 1.0 0.0 0.0
-pose cuboid_yellow 0.62865 0.14524 0.06 0.0 1.0 0.0 0.0
-pose cuboid_orange 0.60984 -0.17340 0.06 0.0 1.0 0.0 0.0
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+# Saved at 2026-05-02 02:14:53
+joint pos_021453 -29.5835 -72.3961 74.4639 -123.2330 -65.4071 -177.3554
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+pose cuboid_red 0.48047 -0.10574 0.06 0.0 1.0 0.0 0.0
+pose cuboid_green 0.45886 -0.14863 0.06 0.0 1.0 0.0 0.0
+pose cuboid_blue 0.45642 -0.18600 0.06 0.0 1.0 0.0 0.0
+pose cuboid_yellow 0.47716 0.02968 0.06 0.0 1.0 0.0 0.0
+pose cuboid_orange 0.60307 -0.25185 0.06 0.0 1.0 0.0 0.0

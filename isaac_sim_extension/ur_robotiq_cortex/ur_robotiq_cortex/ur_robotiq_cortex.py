@@ -9,7 +9,9 @@ from typing import Optional, Sequence
 from pathlib import Path
 from pxr import Gf, Usd, Sdf
 
-from isaacsim.core.api.objects import DynamicCuboid
+import time
+
+from isaacsim.core.api.objects import DynamicCuboid, VisualCuboid, VisualSphere
 from isaacsim.cortex.framework.cortex_utils import load_behavior_module
 from pxr import UsdGeom
 from isaacsim.cortex.framework.cortex_world import CortexWorld
@@ -227,6 +229,351 @@ class ObjectPosePublisher:
             self._node = None
 
 
+class SpaceMouseHandController:
+    """Drives a hand-shaped visual cluster from SpaceMouse and publishes hand state.
+
+    Subscribes
+    ----------
+    /hand/cmd_pose   geometry_msgs/PoseStamped — absolute hand world pose
+                                                 from spacemouse_hand_teleop_node
+    /hand/grab_held  std_msgs/Bool             — true while grabbing
+                                                 (toggled by BTN_1 in the node)
+
+    Publishes
+    ---------
+    /hand/pose             PoseStamped — authoritative hand world pose
+    /hand/closest_to       String      — graspable name with smallest
+                                          euclidean distance to the hand
+                                          ("none" if no graspables)
+    /hand/moving_towards   String      — graspable name whose direction-from-hand
+                                          best aligns with hand velocity (cosine
+                                          similarity above MOVE_COS_THRESHOLD).
+                                          "none" if hand is too slow or alignment
+                                          is below threshold for all candidates.
+    /hand/holding          String      — currently grabbed graspable, "none" if
+                                          released.
+
+    Visualization
+    -------------
+    Renders the hand as one flat palm cuboid + 5 finger spheres, all parented
+    notionally to the hand position (offsets are world-frame because the hand
+    only tracks position, not orientation).
+    """
+
+    CMD_POSE_TOPIC = "/hand/cmd_pose"
+    GRAB_TOPIC     = "/hand/grab_held"
+    POSE_TOPIC     = "/hand/pose"
+    CLOSEST_TOPIC  = "/hand/closest_to"
+    MOVING_TOPIC   = "/hand/moving_towards"
+    HOLDING_TOPIC  = "/hand/holding"
+
+    POSE_STALE_TIMEOUT  = 1.0     # s — release if cmd_pose stops arriving
+    MIN_SPEED_FOR_INTENT = 0.05    # m/s — below this, "moving_towards" = none
+    MOVE_COS_THRESHOLD   = 0.6     # ≈ 53° cone — required alignment
+    GRAB_RADIUS          = 0.15    # m — only grab a cuboid within this radius
+    PUBLISH_HZ           = 30.0
+    PHYSICS_HZ           = 60.0
+    VEL_FILTER_ALPHA     = 0.3     # EMA smoothing for hand velocity
+
+    HAND_PARENT_PRIM = "/World/Hand"
+    HAND_COLOR       = np.array([0.95, 0.75, 0.60])  # skin tone
+
+    # Hand-local offsets (world-frame, since hand has no orientation).
+    # Palm centred at the hand position; fingers spread along +X.
+    _PALM_SIZE      = np.array([0.10, 0.07, 0.02])
+    _FINGER_OFFSETS = [
+        # (offset, radius, label)
+        (np.array([0.030,  0.045,  0.000]), 0.014, "thumb"),
+        (np.array([0.075,  0.025,  0.000]), 0.011, "index"),
+        (np.array([0.080,  0.000,  0.000]), 0.011, "middle"),
+        (np.array([0.075, -0.025,  0.000]), 0.011, "ring"),
+        (np.array([0.065, -0.045,  0.000]), 0.010, "pinky"),
+    ]
+
+    def __init__(self, world, graspable_names, anchor_position=(0.6, 0.0, 0.20)):
+        self._world = world
+        self._graspable_names = list(graspable_names)
+        self._anchor_pos = np.array(anchor_position, dtype=np.float64)
+        self._hand_pos   = self._anchor_pos.copy()
+        self._prev_pos   = self._anchor_pos.copy()
+        self._velocity   = np.zeros(3, dtype=np.float64)
+        self._last_pose_time   = 0.0
+        self._last_update_time = time.monotonic()
+        self._grab_held    = False
+        self._prev_grab    = False
+        self._grabbed_name = None
+
+        self._debug = os.environ.get("UR_HAND_DEBUG", "1").lower() in ("1", "true", "yes", "on")
+        self._pose_count = 0
+        self._grab_msg_count = 0
+        self._update_count = 0
+        self._publish_interval = max(1, int(self.PHYSICS_HZ / self.PUBLISH_HZ))
+
+        # ---- visualize a hand cluster (palm + 5 fingers) ----
+        self._hand_parts = []  # list[(prim_object, np.array offset)]
+        try:
+            palm = world.scene.add(
+                VisualCuboid(
+                    prim_path=f"{self.HAND_PARENT_PRIM}/Palm",
+                    name="hand_palm",
+                    position=self._hand_pos,
+                    scale=self._PALM_SIZE,
+                    color=self.HAND_COLOR,
+                )
+            )
+            self._hand_parts.append((palm, np.zeros(3)))
+        except Exception as e:
+            LOGGER(f"SpaceMouseHandController: could not spawn palm mesh: {e}")
+
+        for offset, radius, label in self._FINGER_OFFSETS:
+            try:
+                tip = world.scene.add(
+                    VisualSphere(
+                        prim_path=f"{self.HAND_PARENT_PRIM}/Finger_{label}",
+                        name=f"hand_finger_{label}",
+                        position=self._hand_pos + offset,
+                        radius=radius,
+                        color=self.HAND_COLOR,
+                    )
+                )
+                self._hand_parts.append((tip, offset.copy()))
+            except Exception as e:
+                LOGGER(f"SpaceMouseHandController: could not spawn finger {label}: {e}")
+
+        # ---- ROS 2 sub/pub ----
+        self._node = None
+        self._rclpy = None
+        self._pose_pub = None
+        self._closest_pub = None
+        self._moving_pub = None
+        self._holding_pub = None
+        try:
+            import rclpy
+            from geometry_msgs.msg import PoseStamped
+            from std_msgs.msg import Bool, String
+            self._rclpy = rclpy
+            self._PoseStamped = PoseStamped
+            self._String = String
+            if not rclpy.ok():
+                rclpy.init()
+            self._node = rclpy.create_node("isaac_spacemouse_hand")
+            self._pose_sub = self._node.create_subscription(
+                PoseStamped, self.CMD_POSE_TOPIC, self._on_cmd_pose, 10
+            )
+            self._grab_sub = self._node.create_subscription(
+                Bool, self.GRAB_TOPIC, self._on_grab, 10
+            )
+            self._pose_pub    = self._node.create_publisher(PoseStamped, self.POSE_TOPIC, 10)
+            self._closest_pub = self._node.create_publisher(String, self.CLOSEST_TOPIC, 10)
+            self._moving_pub  = self._node.create_publisher(String, self.MOVING_TOPIC, 10)
+            self._holding_pub = self._node.create_publisher(String, self.HOLDING_TOPIC, 10)
+            LOGGER(
+                f"SpaceMouseHandController: subscribed to {self.CMD_POSE_TOPIC} (PoseStamped) "
+                f"and {self.GRAB_TOPIC} (Bool); publishing /hand/{{pose,closest_to,moving_towards,holding}}"
+            )
+        except Exception as e:
+            LOGGER(f"SpaceMouseHandController: ROS 2 setup failed — {e}")
+
+    # ---- subscribers ----
+
+    def _on_cmd_pose(self, msg):
+        # Absolute hand position in world frame.
+        self._hand_pos[0] = float(msg.pose.position.x)
+        self._hand_pos[1] = float(msg.pose.position.y)
+        self._hand_pos[2] = float(msg.pose.position.z)
+        self._last_pose_time = time.monotonic()
+        self._pose_count += 1
+
+    def _on_grab(self, msg):
+        self._grab_msg_count += 1
+        self._grab_held = bool(msg.data)
+
+    # ---- per-physics-step update ----
+
+    def update(self):
+        self._update_count += 1
+        if self._node is not None and self._rclpy is not None:
+            for _ in range(4):
+                try:
+                    self._rclpy.spin_once(self._node, timeout_sec=0.0)
+                except Exception as e:
+                    if self._debug and self._update_count % 300 == 1:
+                        LOGGER(f"SpaceMouseHandController: spin_once error: {e}")
+                    break
+
+        # Velocity from finite-difference + EMA smoothing.
+        now = time.monotonic()
+        dt = max(1e-3, now - self._last_update_time)
+        self._last_update_time = now
+        instant_vel = (self._hand_pos - self._prev_pos) / dt
+        self._velocity = (
+            self.VEL_FILTER_ALPHA * instant_vel
+            + (1.0 - self.VEL_FILTER_ALPHA) * self._velocity
+        )
+        self._prev_pos = self._hand_pos.copy()
+
+        # Stale pose → drop a held grab so a dead teleop doesn't pin objects.
+        pose_fresh = (
+            self._last_pose_time > 0.0
+            and (now - self._last_pose_time) < self.POSE_STALE_TIMEOUT
+        )
+
+        # Grab edge detection (with stale-pose safety).
+        wants_grab = self._grab_held and pose_fresh
+        if wants_grab and not self._prev_grab:
+            self._try_grab()
+        elif not wants_grab and self._prev_grab:
+            if self._debug:
+                reason = "released" if not self._grab_held else "pose stale"
+                LOGGER(f"Hand grab RELEASED ({reason})")
+            self._release()
+        self._prev_grab = wants_grab
+
+        # Move the visual hand parts.
+        for prim, offset in self._hand_parts:
+            try:
+                prim.set_world_pose(position=self._hand_pos + offset)
+            except Exception:
+                pass
+
+        # Pin the held object to the palm centre.
+        if self._grabbed_name is not None:
+            obj = self._world.scene.get_object(self._grabbed_name)
+            if obj is not None:
+                try:
+                    obj.set_world_pose(position=self._hand_pos)
+                    if hasattr(obj, "set_linear_velocity"):
+                        obj.set_linear_velocity(np.zeros(3))
+                    if hasattr(obj, "set_angular_velocity"):
+                        obj.set_angular_velocity(np.zeros(3))
+                except Exception:
+                    pass
+
+        # Compute and publish hand state at PUBLISH_HZ.
+        if self._update_count % self._publish_interval == 0:
+            self._publish_state()
+
+        if self._debug and (self._update_count == 1 or self._update_count % 300 == 0):
+            sub_state = "no node" if self._node is None else "subscribed"
+            LOGGER(
+                f"Hand heartbeat: updates={self._update_count} "
+                f"poses={self._pose_count} grab_msgs={self._grab_msg_count} "
+                f"grab_held={self._grab_held} grabbed={self._grabbed_name} "
+                f"sub={sub_state} pos=({self._hand_pos[0]:+.3f},{self._hand_pos[1]:+.3f},{self._hand_pos[2]:+.3f})"
+            )
+
+    # ---- grab logic ----
+
+    def _try_grab(self):
+        nearest = None
+        nearest_d = self.GRAB_RADIUS
+        for name in self._graspable_names:
+            obj = self._world.scene.get_object(name)
+            if obj is None:
+                continue
+            try:
+                pos, _ = obj.get_world_pose()
+                d = float(np.linalg.norm(np.array(pos) - self._hand_pos))
+            except Exception:
+                continue
+            if d < nearest_d:
+                nearest_d = d
+                nearest = name
+        if nearest is not None:
+            self._grabbed_name = nearest
+            LOGGER(f"SpaceMouseHandController: grabbed {nearest} (d={nearest_d:.3f}m)")
+        else:
+            LOGGER("SpaceMouseHandController: grab requested but no object within radius")
+
+    def _release(self):
+        if self._grabbed_name is not None:
+            LOGGER(f"SpaceMouseHandController: released {self._grabbed_name}")
+            self._grabbed_name = None
+
+    # ---- state computation + publishing ----
+
+    def _compute_closest_and_moving(self):
+        """Return (closest_name, moving_towards_name). Both may be 'none'."""
+        if not self._graspable_names:
+            return "none", "none"
+
+        speed = float(np.linalg.norm(self._velocity))
+        v_hat = self._velocity / speed if speed > 1e-6 else None
+
+        closest_name, closest_d = "none", float("inf")
+        best_name, best_score   = "none", -1.0
+
+        for name in self._graspable_names:
+            obj = self._world.scene.get_object(name)
+            if obj is None:
+                continue
+            try:
+                obj_pos, _ = obj.get_world_pose()
+            except Exception:
+                continue
+            rel = np.array(obj_pos, dtype=np.float64) - self._hand_pos
+            d = float(np.linalg.norm(rel))
+            if d < closest_d:
+                closest_d = d
+                closest_name = name
+
+            if v_hat is not None and d > 1e-6:
+                rel_hat = rel / d
+                score = float(np.dot(v_hat, rel_hat))
+                if score > best_score:
+                    best_score = score
+                    best_name = name
+
+        if speed < self.MIN_SPEED_FOR_INTENT or best_score < self.MOVE_COS_THRESHOLD:
+            moving_name = "none"
+        else:
+            moving_name = best_name
+
+        return closest_name, moving_name
+
+    def _publish_state(self):
+        if self._node is None or self._pose_pub is None:
+            return
+        try:
+            stamp = self._node.get_clock().now().to_msg()
+        except Exception:
+            stamp = None
+
+        # /hand/pose
+        try:
+            pose_msg = self._PoseStamped()
+            pose_msg.header.frame_id = "world"
+            if stamp is not None:
+                pose_msg.header.stamp = stamp
+            pose_msg.pose.position.x = float(self._hand_pos[0])
+            pose_msg.pose.position.y = float(self._hand_pos[1])
+            pose_msg.pose.position.z = float(self._hand_pos[2])
+            pose_msg.pose.orientation.w = 1.0
+            self._pose_pub.publish(pose_msg)
+        except Exception as e:
+            if self._update_count % 300 == 0:
+                LOGGER(f"SpaceMouseHandController: pose publish error — {e}")
+
+        # /hand/closest_to, /hand/moving_towards, /hand/holding
+        try:
+            closest_name, moving_name = self._compute_closest_and_moving()
+            holding_name = self._grabbed_name if self._grabbed_name is not None else "none"
+            self._closest_pub.publish(self._String(data=closest_name))
+            self._moving_pub.publish(self._String(data=moving_name))
+            self._holding_pub.publish(self._String(data=holding_name))
+        except Exception as e:
+            if self._update_count % 300 == 0:
+                LOGGER(f"SpaceMouseHandController: state publish error — {e}")
+
+    def shutdown(self):
+        if self._node is not None:
+            try:
+                self._node.destroy_node()
+            except Exception:
+                pass
+            self._node = None
+
+
 class URRobotiqCortex(CortexBase):
     """Isaac Sim sample for UR5/UR10 with Robotiq gripper.
 
@@ -255,6 +602,9 @@ class URRobotiqCortex(CortexBase):
 
         # Object pose publisher (set up in setup_scene)
         self._object_pose_publisher = None
+
+        # SpaceMouse-driven hand controller (set up in setup_scene)
+        self._spacemouse_hand_controller = None
 
         # Cuboid bookkeeping for re-randomization on reset
         self._cuboid_specs = []
@@ -533,6 +883,12 @@ class URRobotiqCortex(CortexBase):
         cuboid_prim_paths = [f"/World/Objects/{name}" for name, _ in cuboid_specs]
         self._object_pose_publisher = ObjectPosePublisher(cuboid_prim_paths)
 
+        # SpaceMouse-driven hand with proximity grab over the cuboids.
+        self._spacemouse_hand_controller = SpaceMouseHandController(
+            world,
+            graspable_names=[name for name, _ in cuboid_specs],
+        )
+
         # Add ground plane underneath with correct position
         try:
             ground_env_path = "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.0/Isaac/Environments/Grid/default_environment.usd"
@@ -777,6 +1133,13 @@ class URRobotiqCortex(CortexBase):
                 if self._physics_step_count % 300 == 0:
                     LOGGER(f"Object pose publisher error: {e}")
 
+        if self._spacemouse_hand_controller is not None:
+            try:
+                self._spacemouse_hand_controller.update()
+            except Exception as e:
+                if self._physics_step_count % 300 == 0:
+                    LOGGER(f"SpaceMouse hand controller error: {e}")
+
         if self._use_direct_ros2 and self._direct_ros2_context is not None:
             try:
                 self._direct_ros2_context.update_from_ros()
@@ -873,3 +1236,7 @@ class URRobotiqCortex(CortexBase):
         if self._object_pose_publisher is not None:
             self._object_pose_publisher.shutdown()
             self._object_pose_publisher = None
+
+        if self._spacemouse_hand_controller is not None:
+            self._spacemouse_hand_controller.shutdown()
+            self._spacemouse_hand_controller = None

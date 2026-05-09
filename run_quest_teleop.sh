@@ -15,7 +15,7 @@
 #   Joystick click       = reset forward direction
 #   Trigger (front)      = gripper open/close (published on /ur5/gripper_cmd)
 
-set -euo pipefail
+set -eo pipefail
 
 # ---------------------------------------------------------------------------
 # Environment cleanup (same as other run scripts - removes conda/snap conflicts)

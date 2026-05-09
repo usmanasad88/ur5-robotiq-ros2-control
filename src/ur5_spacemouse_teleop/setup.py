@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'spacemouse_teleop_node = ur5_spacemouse_teleop.spacemouse_teleop_node:main',
+            'spacemouse_hand_teleop_node = ur5_spacemouse_teleop.spacemouse_hand_teleop_node:main',
         ],
     },
 )
