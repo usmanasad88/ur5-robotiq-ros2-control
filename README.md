@@ -1,4 +1,4 @@
-# ur_ws — UR5 Control Workspace for AURA
+# UR5 Control Workspace for AURA
 
 ROS 2 workspace and tooling that backs the robot side of the AURA framework
 described in *"Modular framework for responsive and explainable robotic
@@ -44,22 +44,6 @@ source ~/Repos/ur_ws/install/setup.bash
 
 cuRobo must be installed against the same Python ROS 2 uses; see the
 [cuRobo install guide](https://curobo.org/get_started/1_install_instructions.html).
-
----
-
-## 2. Demo data
-
-Recorded teleoperation episodes, reference videos, and the LeRobot dataset
-splits referenced in the paper are **not** tracked in git.
-
-> **TODO:** Download `data/` and `recordings/` from Google Drive —
-> `<link to be added>` and extract into the repo root:
->
-> ```
-> ur_ws/
->   data/         LeRobot datasets (parquet + videos)
->   recordings/   raw HDF5 + MP4 episodes from the Episode Recorder
-> ```
 
 ---
 
@@ -182,35 +166,3 @@ source ~/Repos/ur_ws/install/setup.bash
 In Isaac Sim: **Examples → Cortex → UR Robotiq Cortex Examples**, pick
 *ROS 2 Follower* or *VLA Control*, then **Load → Start**.
 
-Switch robot model with `export UR_ROBOT_TYPE=ur10` before launching.
-
-See [isaac_sim_extension/README.md](isaac_sim_extension/README.md) for
-troubleshooting (missing symlink, USD paths, cuRobo install, ROS 2 sourcing).
-
----
-
-## 6. Data collection
-
-The Episode Recorder in `experiment_recorder.py` captures synchronised
-joint states (HDF5, ≤50 Hz), workspace + wrist-camera video (MP4), and
-program-execution events (JSON) during both teleoperation and autonomous
-operation. `convert_to_lerobot.py` converts these episodes into the
-[LeRobot](https://github.com/huggingface/lerobot) format (7-D state/action:
-6 joints + gripper) for fine-tuning $\pi_0$, OpenVLA, SmolVLA, etc.
-
----
-
-## 7. Citing
-
-If you use this code or the released data, please cite:
-
-```bibtex
-@article{Asad2026AURA,
-  title  = {Modular framework for responsive and explainable robotic
-            assistance with intention prediction using human-centric
-            digital twins},
-  author = {Asad, Usman and Khalid, Azfar and Lughmani, Waqas Akbar
-            and Rasheed, Shummaila and Khan, Muhammad Mahabat},
-  year   = {2026}
-}
-```
