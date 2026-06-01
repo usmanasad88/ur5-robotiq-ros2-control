@@ -1,0 +1,49 @@
+# Close the kettle lid after water has been poured.
+#
+# Usage:
+#   close_kettle_lid[safe]
+#   close_kettle_lid[safe=Home]
+#
+# Mapped from the robot_skills.json `close_kettle_lid` skill. The robot
+# can close the lid but CANNOT open it (the human opens it to signal intent).
+# Preconditions (planner-enforced): lid is OPEN and water is in the kettle.
+#
+# Behaviour:
+#   1. Start from the safe pose with the gripper closed (compact tool tip).
+#   2. Move to the pose just above the open lid.
+#   3. Press straight down onto the lid to snap it shut.
+#   4. Retreat back up to the approach pose and return to the safe pose.
+# args: safe
+
+set_speed(0.4)
+
+# --- Start from a known safe pose ---
+if not_near({safe}, 0.15)
+  movetonamed({safe})
+  wait(0.5)
+endif
+
+# Close the gripper so the end-effector is a compact tip for pressing
+if gripper_open
+  closegripper
+  wait(0.5)
+endif
+
+# --- Approach above the open lid ---
+set_speed(0.3)
+movetonamed(Kettle_Lid_Above)
+wait(0.5)
+
+# --- Press down to close the lid ---
+set_speed(0.15)
+movetonamed(Kettle_Lid_Closed)
+wait(1.0)
+
+# --- Retreat straight back up to the approach pose (clear of the lid) ---
+set_speed(0.3)
+movetonamed(Kettle_Lid_Above)
+wait(0.3)
+
+# --- Return to safe ---
+movetonamed({safe})
+wait(0.5)

@@ -1,0 +1,75 @@
+# Pour water from the open water bottle into the open kettle.
+#
+# Usage:
+#   pour_water_into_kettle[safe]
+#   pour_water_into_kettle[safe=Home]
+#
+# Mapped from the robot_skills.json `pour_water_into_kettle` skill.
+# Preconditions (enforced by the planner, not here): the bottle cap is
+# OPEN, the kettle lid is OPEN, and the kettle is not yet filled.
+#
+# Behaviour:
+#   1. Start from the safe pose with the gripper open.
+#   2. Grasp the (open) water bottle at its working-area pose.
+#   3. Carry it upright to the pour-approach pose above the kettle mouth.
+#   4. Tilt to the pour pose, dwell while water flows, then return upright.
+#   5. Set the bottle back down at its working-area pose and retreat.
+# args: safe
+
+set_speed(0.4)
+
+# --- Start from a known safe pose, gripper open ---
+if not_near({safe}, 0.15)
+  movetonamed({safe})
+  wait(0.5)
+endif
+
+if gripper_closed
+  opengripper
+  wait(0.5)
+endif
+
+# --- Grasp the open water bottle (sitting in the working area) ---
+moverelative(water_bottle_workplace, up, 0.15)
+wait(0.3)
+
+movetonamed(water_bottle_workplace)
+wait(0.3)
+
+closegripper
+wait(1.0)
+
+moverelative(water_bottle_workplace, up, 0.15)
+wait(0.3)
+
+# --- Carry the bottle (upright) over the kettle mouth ---
+set_speed(0.3)
+movetonamed(Kettle_Pour_Approach)
+wait(0.5)
+
+# --- Tilt to pour, dwell while the water flows, then right the bottle ---
+set_speed(0.2)
+movetonamed(Kettle_Pour_Tilt)
+wait(4.0)
+
+movetonamed(Kettle_Pour_Approach)
+wait(0.5)
+
+# --- Put the bottle back down in the working area ---
+set_speed(0.4)
+moverelative(water_bottle_workplace, up, 0.15)
+wait(0.3)
+
+movetonamed(water_bottle_workplace)
+wait(0.3)
+
+opengripper
+wait(0.5)
+
+moverelative(water_bottle_workplace, up, 0.15)
+wait(0.3)
+
+# --- Return to safe ---
+set_speed(0.3)
+movetonamed({safe})
+wait(0.5)

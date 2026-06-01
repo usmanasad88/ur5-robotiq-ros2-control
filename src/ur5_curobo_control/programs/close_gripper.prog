@@ -1,0 +1,5 @@
+# Close the Robotiq gripper.
+# Mapped from the robot_skills.json `close_gripper` skill (no args).
+
+closegripper
+wait(0.5)

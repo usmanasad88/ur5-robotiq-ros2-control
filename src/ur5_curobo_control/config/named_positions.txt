@@ -118,3 +118,58 @@ pose cuboid_green 0.45886 -0.14863 0.06 0.0 1.0 0.0 0.0
 pose cuboid_blue 0.45642 -0.18600 0.06 0.0 1.0 0.0 0.0
 pose cuboid_yellow 0.47716 0.02968 0.06 0.0 1.0 0.0 0.0
 pose cuboid_orange 0.60307 -0.25185 0.06 0.0 1.0 0.0 0.0
+
+
+# ============================================================
+# Kettle Tea-Making Task   (aura/tasks/kettle_tea_making)
+# ============================================================
+# Positions referenced by the tea-making .prog files:
+#   pick_and_place_items.prog, pour_water_into_kettle.prog,
+#   close_kettle_lid.prog, turn_kettle_on.prog
+#
+# All entries below are PLACEHOLDERS. Jog the robot to each spot, read
+# off the six joint angles (DEGREES, order j1..j6), and replace the
+# zeros. Keep each line uncommented once filled — movetonamed() fails at
+# runtime on an undefined name. Delete any item your setup doesn't use.
+# (You can use `pose <name> x y z qw qx qy qz` instead of joints if you
+#  prefer Cartesian targets — see the format header at the top of file.)
+
+# ----- Per-item poses: <item>_storage (pick) + <item>_workplace (drop) -
+# Items can't share one drop spot, so every item gets its own pair: it is
+# grasped from above at <item>_storage and set down at <item>_workplace.
+# robot_skills.json passes object=<item>_storage destination=<item>_workplace.
+# TODO joint water_bottle_storage      0 0 0 0 0 0
+# TODO joint water_bottle_workplace    0 0 0 0 0 0
+# TODO joint milk_container_storage    0 0 0 0 0 0
+# TODO joint milk_container_workplace  0 0 0 0 0 0
+# TODO joint sugar_container_storage   0 0 0 0 0 0
+# TODO joint sugar_container_workplace 0 0 0 0 0 0
+# TODO joint tea_bag_storage           0 0 0 0 0 0
+# TODO joint tea_bag_workplace         0 0 0 0 0 0
+# TODO joint cup_storage               0 0 0 0 0 0
+# TODO joint cup_workplace             0 0 0 0 0 0
+# TODO joint spoon_storage             0 0 0 0 0 0
+# TODO joint spoon_workplace           0 0 0 0 0 0
+# TODO joint biscuits_storage          0 0 0 0 0 0
+# TODO joint biscuits_workplace        0 0 0 0 0 0
+#
+# Dropping INTO the cup: tea_bag and spoon use destination=cup_workplace
+# (the cup sits at its own workplace pose), so no separate `cup` name and
+# no storage-vs-workplace collision.
+
+# ----- Kettle interaction poses ----------------------------
+# Pour: carry the open bottle upright to *_Approach over the kettle
+# mouth, then tilt to *_Tilt to pour. _Tilt differs from _Approach mainly
+# in wrist orientation (bottle rotated ~90-120 deg to pour).
+# TODO joint Kettle_Pour_Approach  0 0 0 0 0 0
+# TODO joint Kettle_Pour_Tilt      0 0 0 0 0 0
+#
+# Lid: _Above sits clear over the open lid; _Closed presses straight down
+# to snap the lid shut. The robot can close the lid but never opens it.
+# TODO joint Kettle_Lid_Above      0 0 0 0 0 0
+# TODO joint Kettle_Lid_Closed     0 0 0 0 0 0
+#
+# Switch: _Above sits clear over the power switch; _On pushes it down/in
+# to start the boil (blue LED turns on).
+# TODO joint Kettle_Switch_Above   0 0 0 0 0 0
+# TODO joint Kettle_Switch_On      0 0 0 0 0 0

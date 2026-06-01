@@ -1,0 +1,5 @@
+# Open the Robotiq gripper.
+# Mapped from the robot_skills.json `open_gripper` skill (no args).
+
+opengripper
+wait(0.5)

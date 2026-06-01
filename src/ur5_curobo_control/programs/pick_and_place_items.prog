@@ -1,0 +1,74 @@
+# Parametric pick-and-place for the kettle tea-making task.
+# Picks a named item from its storage pose and places it at a named
+# destination, transiting via a safe (home) pose between phases.
+#
+# Usage:
+#   pick_and_place_items[item, destination, safe]
+#   pick_and_place_items[object=tea_bag, destination=cup, safe=Home]
+#
+# Invoked by the robot_skills.json skills `pick_and_place_item` and
+# `bring_water_bottle` with program_args like:
+#   object=milk_container destination=working_area safe=Home
+#
+# `object` and `destination` must each match a named position in
+# config/named_positions.txt (the item ids double as the storage pose
+# names; `working_area` and `cup` are the two drop destinations).
+#
+# Behaviour:
+#   1. If not already near the safe pose, move there.
+#   2. Open the gripper if it is closed.
+#   3. Approach the item from 15 cm above, descend, grasp, lift.
+#   4. Return to the safe pose.
+#   5. Approach the destination from 15 cm above, descend, release, lift.
+#   6. Return to the safe pose.
+# args: object, destination, safe
+
+set_speed(0.5)
+
+# --- Start from a known safe pose ---
+if not_near({safe}, 0.15)
+  movetonamed({safe})
+  wait(0.5)
+endif
+
+if gripper_closed
+  opengripper
+  wait(0.5)
+endif
+
+# --- Pick phase: grasp the item at its storage pose ---
+moverelative({object}, up, 0.15)
+wait(0.3)
+
+movetonamed({object})
+wait(0.3)
+
+closegripper
+wait(1.0)
+
+moverelative({object}, up, 0.15)
+wait(0.3)
+
+# Retreat to safe before crossing to the destination
+set_speed(0.3)
+movetonamed({safe})
+wait(0.5)
+
+# --- Place phase: release at the destination pose ---
+set_speed(0.5)
+
+moverelative({destination}, up, 0.15)
+wait(0.3)
+
+movetonamed({destination})
+wait(0.3)
+
+opengripper
+wait(0.5)
+
+moverelative({destination}, up, 0.15)
+wait(0.3)
+
+set_speed(0.3)
+movetonamed({safe})
+wait(0.5)
