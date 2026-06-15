@@ -94,14 +94,47 @@ sudo apt install android-tools-adb
 adb devices            # confirm device visible
 ```
 
-For the **real robot**, bypass `launch_all.sh` and use the RTDE driver:
+For the **real robot**, bypass `launch_all.sh` and use the RTDE driver
+(`src/quest_teleop/` package):
 
 ```bash
-bash run_quest_rtde_teleop.sh
+./run_quest_rtde_teleop.sh                        # USB ADB (default)
+QUEST_IP=192.168.0.42 ./run_quest_rtde_teleop.sh  # wireless ADB
+./run_quest_rtde_teleop.sh --dry-run              # no robot: log commands only
 ```
 
-Trigger = gripper proportional, grip button = deadman, A/B buttons save the
-current configuration as a named position (used by `.prog` files).
+Wireless one-time setup (per Quest reboot): connect USB, `adb tcpip 5555`,
+find the IP with `adb shell ip route`, unplug, pass `QUEST_IP=<ip>`.
+
+Controls: **trigger** = gripper proportional, **grip** button = deadman,
+**joystick click** = reset forward direction (do this first — yaw-only, so
+controller tilt at click doesn't tilt the workspace), **A/X** button =
+toggle precision (slow) mode.
+
+A reader watchdog stops the robot if the Quest pose stream goes stale for
+more than `--watchdog-timeout` (default 0.25 s — Quest sleep, Wi-Fi drop);
+release and re-press grip to resume.
+
+Motion-quality flags (Phase 2):
+
+```bash
+./run_quest_rtde_teleop.sh --filter-alpha 0.8   # VR pose low-pass: 0=off, →1=smoother
+./run_quest_rtde_teleop.sh --pos-scale 1.0      # robot delta = scale × controller delta
+./run_quest_rtde_teleop.sh --precision-scale 0.5 # pos-scale multiplier when precision ON
+```
+
+Velocity saturation is uniform (DROID-style): when linear or angular speed
+exceeds its limit, both scale by the same factor so the motion direction is
+preserved. All gains/limits are flags — see `./run_quest_rtde_teleop.sh --help`.
+
+The original single-file version remains available:
+`python3 -m ur5_vr_teleop.quest_rtde_teleop` (from `src/`).
+
+Unit tests for the teleop math (scipy as reference implementation):
+
+```bash
+cd src && python -m pytest quest_teleop/tests/ -q
+```
 
 ### SpaceMouse
 
