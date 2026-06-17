@@ -48,6 +48,13 @@ class URRobot:
     def speed_stop(self, accel):
         self.rtde_c.speedStop(accel)
 
+    def servo_l(self, pose, dt, lookahead_time, gain):
+        # speed & acceleration args are ignored by servoL; pass 0.
+        self.rtde_c.servoL(list(pose), 0.0, 0.0, dt, lookahead_time, gain)
+
+    def servo_stop(self):
+        self.rtde_c.servoStop()
+
     def stop_script(self):
         self.rtde_c.stopScript()
 
@@ -101,6 +108,23 @@ class DryRunRobot:
     def speed_stop(self, accel):
         self._last_integrate = None
         print(f"[dry-run] speedStop(accel={accel:.2f})")
+
+    def servo_l(self, pose, dt, lookahead_time, gain):
+        # servoL commands an absolute pose; the loop has already clamped the
+        # per-cycle step, so snap the virtual TCP to it (realistic tracking).
+        pose = np.asarray(pose, dtype=float)
+        self._pos = pose[:3].copy()
+        self._quat = rotvec_to_quat(pose[3:])
+        now = time.monotonic()
+        if now - self._last_log >= self._log_period:
+            self._last_log = now
+            print(f"[dry-run] servoL pose=[{pose[0]:+.3f},{pose[1]:+.3f},"
+                  f"{pose[2]:+.3f} | {pose[3]:+.3f},{pose[4]:+.3f},{pose[5]:+.3f}] "
+                  f"dt={dt:.3f} lookahead={lookahead_time:.3f} gain={gain:.0f}")
+
+    def servo_stop(self):
+        self._last_integrate = None
+        print("[dry-run] servoStop()")
 
     def stop_script(self):
         print("[dry-run] stopScript()")

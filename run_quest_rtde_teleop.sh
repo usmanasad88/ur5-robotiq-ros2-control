@@ -61,6 +61,13 @@ else
 fi
 
 EXTRA_ARGS=("$@")
+# Honor a --robot-ip passed as an argument (so the echo below is accurate and
+# we don't pass the flag twice).
+prev=""
+for a in "$@"; do
+    [[ "$prev" == "--robot-ip" ]] && ROBOT_IP="$a"
+    prev="$a"
+done
 if [[ -n "$QUEST_IP" ]]; then
     EXTRA_ARGS+=(--quest-ip "$QUEST_IP")
 fi

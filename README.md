@@ -94,22 +94,49 @@ sudo apt install android-tools-adb
 adb devices            # confirm device visible
 ```
 
-For the **real robot**, bypass `launch_all.sh` and use the RTDE driver
-(`src/quest_teleop/` package):
+The `src/quest_teleop/` package has two back-ends sharing one control loop
+(DROID P-controller + the Phase 2 motion-quality improvements):
+
+| Target | Command | Path |
+|---|---|---|
+| **`launch_all.sh` sim** (fake or real hw) | `./run_quest_teleop_sim.sh` | Jacobian IK → `/forward_velocity_controller` |
+| **Real robot / URSim** (RTDE) | `./run_quest_rtde_teleop.sh` | `ur_rtde` `speedL` direct |
+
+For the **`launch_all.sh` simulated UR5** (the fake-hardware sim does *not*
+serve RTDE — it's driven through ROS 2 control):
+
+```bash
+./launch_all.sh                       # bring up the sim first
+./run_quest_teleop_sim.sh             # auto-switches to forward_velocity_controller
+./run_quest_teleop_sim.sh --left      # left controller
+./run_quest_teleop_sim.sh --no-swap   # if you switched with ./toggle_controller.sh yourself
+```
+
+For the **real robot or URSim**, use the RTDE back-end:
 
 ```bash
 ./run_quest_rtde_teleop.sh                        # USB ADB (default)
 QUEST_IP=192.168.0.42 ./run_quest_rtde_teleop.sh  # wireless ADB
 ./run_quest_rtde_teleop.sh --dry-run              # no robot: log commands only
+./run_quest_rtde_teleop.sh --mode servo           # servoL position streaming (RTDE only)
 ```
+
+Two control modes on the RTDE back-end (`--mode`):
+- **`speed`** (default): `speedL` Cartesian velocity from a P-controller.
+- **`servo`**: `servoL` position streaming — target pose with a per-cycle
+  displacement clamp (`--max-pos-step`/`--max-rot-step`, default
+  `max_lin_vel÷hz` / `max_rot_vel÷hz`), `--lookahead-time` (0.1) and
+  `--servo-gain` (300). Often smoother on the real robot. Validate on hardware
+  before relying on it; `speed` stays the default for now.
 
 Wireless one-time setup (per Quest reboot): connect USB, `adb tcpip 5555`,
 find the IP with `adb shell ip route`, unplug, pass `QUEST_IP=<ip>`.
 
-Controls: **trigger** = gripper proportional, **grip** button = deadman,
-**joystick click** = reset forward direction (do this first — yaw-only, so
-controller tilt at click doesn't tilt the workspace), **A/X** button =
-toggle precision (slow) mode.
+Controls: **trigger** = gripper toggle (press → close, press again → open;
+fires the Robotiq URCap on the real robot). Use `--gripper-mode proportional`
+for the old continuous mapping. **grip** button = deadman, **joystick click**
+= reset forward direction (do this first — yaw-only, so controller tilt at
+click doesn't tilt the workspace), **A/X** button = toggle precision (slow) mode.
 
 A reader watchdog stops the robot if the Quest pose stream goes stale for
 more than `--watchdog-timeout` (default 0.25 s — Quest sleep, Wi-Fi drop);

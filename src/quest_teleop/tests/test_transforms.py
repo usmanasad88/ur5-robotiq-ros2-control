@@ -17,6 +17,7 @@ from quest_teleop.transforms import (
     quat_to_rotvec,
     rmat_to_quat,
     rotvec_to_quat,
+    scale_to_max_norm,
     slerp,
     twist_about_axis,
     vec_to_reorder_mat,
@@ -224,6 +225,24 @@ def test_limit_velocity_preserves_direction():
     # tightest constraint binds: both within limits
     assert np.linalg.norm(out_l) <= 0.15 + 1e-12
     assert np.linalg.norm(out_a) <= 0.75 + 1e-12
+
+
+def test_scale_to_max_norm_passes_small_through():
+    v = np.array([0.001, 0.002, 0.0])
+    np.testing.assert_allclose(scale_to_max_norm(v, 0.01), v)
+
+
+def test_scale_to_max_norm_clamps_and_keeps_direction():
+    v = np.array([0.3, -0.4, 0.0])     # norm 0.5
+    out = scale_to_max_norm(v, 0.1)
+    np.testing.assert_allclose(np.linalg.norm(out), 0.1, atol=1e-12)
+    np.testing.assert_allclose(out / np.linalg.norm(out), v / np.linalg.norm(v))
+
+
+def test_scale_to_max_norm_disabled_when_nonpositive():
+    v = np.array([5.0, 0.0, 0.0])
+    np.testing.assert_allclose(scale_to_max_norm(v, 0.0), v)
+    np.testing.assert_allclose(scale_to_max_norm(v, -1.0), v)
 
 
 def test_limit_velocity_uses_min_ratio():

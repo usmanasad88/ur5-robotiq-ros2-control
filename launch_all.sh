@@ -92,7 +92,7 @@ fi
 # Window: Quest 3S sim teleop via cuRobo/PoseDelta (--quest)
 if [ "$LAUNCH_QUEST" = true ] && [ "$USE_FAKE" = "true" ]; then
     tmux new-window -t "$SESSION" -n "Quest-Teleop" \
-        "echo '[Quest] Waiting 10s for cuRobo executor...'; sleep 10; echo '[Quest] Starting Quest 3S sim teleop...'; \"$SCRIPT_DIR/run_quest_sim_teleop.sh\"; exec bash"
+        "echo '[Quest] Waiting 10s for cuRobo executor...'; sleep 10; echo '[Quest] Starting Quest 3S sim teleop...'; \"$SCRIPT_DIR/run_quest_sim_teleop_legacy.sh\"; exec bash"
 elif [ "$LAUNCH_QUEST" = true ] && [ "$USE_FAKE" = "false" ]; then
     echo "NOTE: --quest uses the ROS 2 / cuRobo path (sim only)."
     echo "      For real robot teleop use: bash run_quest_rtde_teleop.sh"
@@ -102,7 +102,7 @@ fi
 # Smoother than cuRobo — no trajectory replanning, direct 50 Hz velocity streaming.
 if [ "$LAUNCH_QUEST_SERVO" = true ] && [ "$USE_FAKE" = "true" ]; then
     tmux new-window -t "$SESSION" -n "Quest-Servo" \
-        "echo '[Quest-Servo] Waiting 5s for UR5 driver...'; sleep 5; echo '[Quest-Servo] Starting Quest servo teleop...'; \"$SCRIPT_DIR/run_quest_servo_teleop.sh\"; exec bash"
+        "echo '[Quest-Servo] Waiting 5s for UR5 driver...'; sleep 5; echo '[Quest-Servo] Starting Quest servo teleop...'; \"$SCRIPT_DIR/run_quest_servo_teleop_legacy.sh\"; exec bash"
 elif [ "$LAUNCH_QUEST_SERVO" = true ] && [ "$USE_FAKE" = "false" ]; then
     echo "NOTE: --quest-servo targets the sim velocity controller (sim only)."
     echo "      For real robot teleop use: bash run_quest_rtde_teleop.sh"

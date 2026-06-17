@@ -36,10 +36,11 @@ class GripperController:
         self._adapter.activate(auto_calibrate=False)
         self._last_trig = -1.0   # force send on first call
         self._deadband  = deadband
+        self._closed    = False  # toggle-mode state
         print("Gripper connected and activated.")
 
     def update(self, trigger: float):
-        """Send a move command if trigger changed more than deadband."""
+        """Proportional mode: send a move command if trigger moved > deadband."""
         trigger = float(np.clip(trigger, 0.0, 1.0))
         if abs(trigger - self._last_trig) < self._deadband:
             return
@@ -47,7 +48,15 @@ class GripperController:
         pos = int(trigger * self.POS_CLOSED)
         self._adapter.move(position=pos, speed=200, force=100)
 
+    def toggle(self):
+        """Toggle-mode: flip between fully open and fully closed."""
+        self._closed = not self._closed
+        pos = self.POS_CLOSED if self._closed else self.POS_OPEN
+        self._adapter.move(position=pos, speed=200, force=100)
+        print(f"Gripper {'CLOSED' if self._closed else 'OPENED'}")
+
     def open(self):
+        self._closed = False
         self._adapter.move(position=self.POS_OPEN, speed=200, force=100)
 
     def disconnect(self):
@@ -63,6 +72,7 @@ class DryRunGripper:
     def __init__(self, deadband: float = 0.05):
         self._last_trig = -1.0
         self._deadband = deadband
+        self._closed = False
 
     def update(self, trigger: float):
         trigger = float(np.clip(trigger, 0.0, 1.0))
@@ -71,7 +81,12 @@ class DryRunGripper:
         self._last_trig = trigger
         print(f"[dry-run] gripper move to {int(trigger * 255)}/255")
 
+    def toggle(self):
+        self._closed = not self._closed
+        print(f"[dry-run] gripper {'CLOSE' if self._closed else 'OPEN'}")
+
     def open(self):
+        self._closed = False
         print("[dry-run] gripper open")
 
     def disconnect(self):

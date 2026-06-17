@@ -136,6 +136,20 @@ def limit_velocity(lin_vel, ang_vel, max_lin, max_ang):
     return lin_vel * scale, ang_vel * scale
 
 
+def scale_to_max_norm(vec, max_norm):
+    """Scale a vector down so ‖vec‖ ≤ max_norm, preserving direction.
+
+    Used for the servo-mode per-cycle displacement clamp (deoxys
+    clip_translation): bounds the step the robot is asked to take each cycle.
+    max_norm <= 0 disables the clamp (pass-through).
+    """
+    vec = np.asarray(vec, dtype=float)
+    n = np.linalg.norm(vec)
+    if max_norm > 0 and n > max_norm:
+        return vec * (max_norm / n)
+    return vec
+
+
 def twist_about_axis(q, axis):
     """Swing-twist decomposition: the component of rotation q about `axis`.
 

@@ -45,3 +45,7 @@ Thumbs.db
 src/Universal_Robots_ROS2_Driver/
 isaac_standalone/Objects/Lab2.usdz
 References/
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc

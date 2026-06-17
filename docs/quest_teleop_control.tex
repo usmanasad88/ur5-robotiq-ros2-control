@@ -1,0 +1,230 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{bm}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{enumitem}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\quat}[1]{\bm{#1}}
+\newcommand{\vp}{\bm{p}}
+\newcommand{\vv}{\bm{v}}
+\newcommand{\vw}{\bm{\omega}}
+\DeclareMathOperator{\rotvec}{rotvec}
+\DeclareMathOperator{\diag}{diag}
+
+\title{\texttt{quest\_teleop}: Control Logic and Math}
+\author{UR5 + Robotiq Quest~3S teleoperation package}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document specifies the control math implemented in the
+\texttt{quest\_teleop} package (\texttt{src/quest\_teleop/}). The mapping from
+Meta Quest~3S controller poses to UR5 motion follows the DROID
+\texttt{VRPolicy} formulation. One backend-agnostic control loop
+(\texttt{teleop.py}) drives two interchangeable robot backends: a direct
+\texttt{ur\_rtde} backend (real robot / URSim) and a ROS~2 backend
+(\texttt{/forward\_velocity\_controller}, for the \texttt{launch\_all.sh}
+fake-hardware simulation). The two backends share \emph{identical} control
+math; they differ only in how the final Cartesian command is realised
+(Section~\ref{sec:backends}).
+\end{abstract}
+
+\tableofcontents
+
+\section{Notation and frames}
+Quaternions are scalar-first, $\quat{q}=(w,x,y,z)$, unit norm, acting as
+rotations via the Hamilton product $\otimes$. The conjugate is
+$\quat{q}^{*}=(w,-x,-y,-z)$. The map $\rotvec(\quat{q})\in\R^3$ returns the
+axis--angle (rotation) vector and $\rotvec^{-1}$ its inverse
+(\texttt{quat\_to\_rotvec}, \texttt{rotvec\_to\_quat}).
+
+\begin{description}[leftmargin=2.4em,style=nextline]
+  \item[VR raw frame] $H^{\text{raw}}\in SE(3)$: the controller pose as
+        reported by \texttt{oculus\_reader} (a $4\times4$ homogeneous matrix).
+  \item[Global$\to$env remap] $M\in\R^{4\times4}$: a signed axis permutation
+        (\texttt{vec\_to\_reorder\_mat}) aligning the VR frame to the robot
+        base frame. Default reorder $[-2,-1,-3,4]$.
+  \item[Alignment] $V\in SE(3)$: the ``forward reset'' transform
+        (Section~\ref{sec:yaw}), a pure rotation.
+  \item[Robot base frame] all robot poses (TCP, origins, targets) live here.
+\end{description}
+
+The controller pose expressed in the robot/env frame is
+\begin{equation}
+  H = M \, V \, H^{\text{raw}},\qquad
+  \vp_{\text{vr}} = H_{1:3,4},\quad
+  \quat{q}_{\text{vr}} = \mathrm{rmat2quat}(H_{1:3,1:3}).
+  \label{eq:process}
+\end{equation}
+
+\section{Forward reset: yaw-only alignment}\label{sec:yaw}
+A joystick click (or the initial orientation reset) sets the alignment $V$ so
+the controller's heading maps to the robot's forward direction. To keep
+gravity vertical regardless of how the controller is tilted at click time, we
+keep \emph{only} the yaw (rotation about the env-vertical axis) and discard the
+tilt --- a swing--twist decomposition.
+
+Let the env ``up'' axis be $\bm{e}_z=(0,0,1)$ in the robot frame; the
+corresponding axis in the VR frame is
+$\bm{a} = M_{1:3,1:3}^{\top}\,\bm{e}_z$. Given the click-time controller
+rotation quaternion $\quat{q}=(w,\bm{u})$ with vector part $\bm{u}$, the twist
+about $\bm{a}$ is
+\begin{equation}
+  \quat{q}_{\text{yaw}} = \frac{(w,\;(\bm{u}\cdot\hat{\bm a})\,\hat{\bm a})}
+       {\lVert (w,\;(\bm{u}\cdot\hat{\bm a})\,\hat{\bm a})\rVert},
+  \qquad \hat{\bm a}=\bm{a}/\lVert\bm{a}\rVert
+  \label{eq:twist}
+\end{equation}
+(\texttt{twist\_about\_axis}). The alignment is the inverse yaw rotation,
+$V = \diag\!\big(R(\quat{q}_{\text{yaw}}^{*}),\,1\big)$, with zero translation;
+the translational baseline is handled separately by the origins
+(Section~\ref{sec:droid}).
+
+\section{VR pose low-pass filter}\label{sec:filter}
+A one-pole filter smooths the controller pose before it drives the robot
+(\texttt{filters.VRPoseFilter}, ported from Open-Teach). With smoothing
+constant $\alpha\in[0,1)$ (\texttt{--filter-alpha}, default $0.8$),
+\begin{align}
+  \vp \;&\leftarrow\; \alpha\,\vp + (1-\alpha)\,\vp_{\text{vr}}, \\
+  \quat{q} \;&\leftarrow\; \mathrm{slerp}\!\big(\quat{q},\,\quat{q}_{\text{vr}},\,1-\alpha\big).
+\end{align}
+$\alpha=0$ disables filtering; larger $\alpha$ is smoother but laggier. The
+first sample after a re-baseline passes through unfiltered so the origins
+below are captured from the same (filtered) stream.
+
+\section{DROID target pose}\label{sec:droid}
+While the grip deadman is held, origins are latched on the first tick:
+the robot TCP origin $(\vp_{o}^{R},\quat{q}_{o}^{R})$ and the (filtered) VR
+origin $(\vp_{o}^{V},\quat{q}_{o}^{V})$. The commanded target tracks the
+controller's \emph{displacement} from its origin.
+
+\paragraph{Position (with scaling).}
+\begin{equation}
+  \vp_{\text{tgt}} = \vp_{o}^{R} + s\,\big(\vp - \vp_{o}^{V}\big),
+  \label{eq:tgtpos}
+\end{equation}
+where $s = s_{\text{pos}}\cdot(s_{\text{prec}}\ \text{if precision else }1)$
+(\texttt{--pos-scale}, default $1.0$; precision toggled by the A/X button,
+\texttt{--precision-scale}, default $0.5$).
+
+\paragraph{Orientation.} The controller's incremental rotation is applied onto
+the robot origin orientation:
+\begin{equation}
+  \Delta\quat{q} = \quat{q} \otimes (\quat{q}_{o}^{V})^{*},\qquad
+  \quat{q}_{\text{tgt}} = \Delta\quat{q} \otimes \quat{q}_{o}^{R}.
+  \label{eq:tgtquat}
+\end{equation}
+
+Equations \eqref{eq:tgtpos}--\eqref{eq:tgtquat} are shared by both control
+modes and both backends.
+
+\section{Control modes}
+Let the current TCP pose be $(\vp_{c},\quat{q}_{c})$ and the control period
+$\Delta t = 1/f$ (\texttt{--hz}, default $50$).
+
+\subsection{Speed mode (\texttt{--mode speed}, default)}
+A proportional controller on the pose error produces a Cartesian twist:
+\begin{align}
+  \vv &= k_p\,(\vp_{\text{tgt}} - \vp_{c}), &
+  k_p &= \texttt{pos\_gain}\ (3.0),\\
+  \quat{e} &= \quat{q}_{\text{tgt}}\otimes\quat{q}_{c}^{*}\ \text{(shortest)}, &
+  \vw &= k_r\,\rotvec(\quat{e}), \quad k_r=\texttt{rot\_gain}\ (2.0).
+\end{align}
+
+\paragraph{Uniform saturation.} When either component exceeds its limit, both
+are scaled by a single factor so the screw axis (motion direction) is
+preserved (\texttt{limit\_velocity}, after DROID):
+\begin{equation}
+  \sigma = \min\!\left(1,\ \frac{v_{\max}}{\lVert\vv\rVert},\
+                       \frac{\omega_{\max}}{\lVert\vw\rVert}\right),\qquad
+  \vv\leftarrow\sigma\vv,\quad \vw\leftarrow\sigma\vw,
+\end{equation}
+with $v_{\max}=\texttt{max\_lin\_vel}\ (0.15\,\mathrm{m/s})$,
+$\omega_{\max}=\texttt{max\_rot\_vel}\ (0.75\,\mathrm{rad/s})$. The twist
+$(\vv,\vw)$ is the command handed to the backend.
+
+\subsection{Servo mode (\texttt{--mode servo}, RTDE only)}
+Instead of a velocity, a clamped absolute target pose is streamed. A per-cycle
+displacement clamp (after the Open-Teach/deoxys operator) bounds the step:
+\begin{align}
+  \vp_{\text{cmd}} &= \vp_{c} + \mathrm{clip}\big(\vp_{\text{tgt}}-\vp_{c},\,\delta_p\big),\\
+  \vw_{\text{step}} &= \mathrm{clip}\big(\rotvec(\quat{q}_{\text{tgt}}\otimes\quat{q}_{c}^{*}),\,\delta_r\big),\quad
+  \quat{q}_{\text{cmd}} = \rotvec^{-1}(\vw_{\text{step}})\otimes\quat{q}_{c},
+\end{align}
+where $\mathrm{clip}(\bm{x},\delta)$ scales $\bm{x}$ to norm $\le\delta$
+(\texttt{scale\_to\_max\_norm}). Defaults
+$\delta_p=v_{\max}\Delta t$, $\delta_r=\omega_{\max}\Delta t$
+(\texttt{--max-pos-step}, \texttt{--max-rot-step}). The pose
+$(\vp_{\text{cmd}},\rotvec(\quat{q}_{\text{cmd}}))$ is the command, with
+servo parameters \texttt{--lookahead-time} ($0.1$) and \texttt{--servo-gain}
+($300$).
+
+\section{Backend realisation}\label{sec:backends}
+Both backends receive the \emph{same} command from the loop above and only
+differ in how they apply it.
+
+\paragraph{RTDE backend (real robot / URSim).}
+\begin{itemize}[leftmargin=1.5em]
+  \item Speed: $\texttt{speedL}\big([\vv;\vw],\,a,\,2\Delta t\big)$.
+  \item Servo: $\texttt{servoL}\big([\vp_{\text{cmd}};\rotvec(\quat{q}_{\text{cmd}})],\,0,0,\Delta t,\,t_{\text{look}},\,\text{gain}\big)$.
+\end{itemize}
+
+\paragraph{ROS backend (\texttt{launch\_all.sh} simulation, speed mode only).}
+The Cartesian twist is mapped to joint velocities through the UR5 geometric
+Jacobian $J(\bm{q})\in\R^{6\times6}$ (\texttt{kinematics.ur5\_fk\_and\_jacobian})
+using damped least squares (\texttt{cartesian\_to\_joint\_vel}):
+\begin{equation}
+  \dot{\bm{q}} = J^{\top}\big(JJ^{\top} + \lambda^2 I\big)^{-1}
+                 \begin{bmatrix}\vv\\\vw\end{bmatrix},
+  \qquad \lambda=\texttt{damping}\ (0.05),
+\end{equation}
+followed by a joint-speed clamp to \texttt{max\_joint\_vel} ($1.5\,\mathrm{rad/s}$),
+direction preserved. $\dot{\bm{q}}$ is published as a
+\texttt{Float64MultiArray} on \texttt{/forward\_velocity\_controller/commands}.
+Servo mode is unavailable here (no \texttt{servoL} equivalent) and is rejected
+at the CLI.
+
+\section{Safety}
+\begin{itemize}[leftmargin=1.5em]
+  \item \textbf{Grip deadman}: motion only while the grip button is held;
+        releasing it re-baselines the origins on the next press.
+  \item \textbf{Reader watchdog}: \texttt{oculus\_reader} serves cached poses
+        with no timestamp, so staleness is detected by change-tracking the raw
+        matrix. If the controller pose is unchanged for
+        $>\texttt{watchdog\_timeout}$ ($0.25\,$s) while enabled, motion is
+        stopped and a latch requires a deliberate grip re-press.
+  \item \textbf{Stop ordering}: the mode-appropriate stop
+        (\texttt{servoStop} in servo mode, else \texttt{speedStop}; zeros on
+        the ROS backend) is issued on grip release, watchdog trip, and
+        shutdown, \emph{before} \texttt{stopScript} and peripheral teardown.
+        The ROS \texttt{forward\_velocity\_controller} holds the last command
+        with no auto-decay, so publishing zeros is mandatory to stop.
+\end{itemize}
+
+\section{Symbol / flag / code reference}
+\begin{center}\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Symbol & Meaning & CLI flag & Default \\
+\midrule
+$s_{\text{pos}}$ & position scale & \texttt{--pos-scale} & $1.0$ \\
+$s_{\text{prec}}$ & precision multiplier & \texttt{--precision-scale} & $0.5$ \\
+$\alpha$ & filter constant & \texttt{--filter-alpha} & $0.8$ \\
+$k_p,k_r$ & P-gains & \texttt{--pos-gain}, \texttt{--rot-gain} & $3.0,\ 2.0$ \\
+$v_{\max},\omega_{\max}$ & velocity limits & \texttt{--max-lin-vel}, \texttt{--max-rot-vel} & $0.15,\ 0.75$ \\
+$\delta_p,\delta_r$ & servo step clamps & \texttt{--max-pos-step}, \texttt{--max-rot-step} & $v_{\max}\Delta t,\ \omega_{\max}\Delta t$ \\
+$t_{\text{look}}$ & servoL lookahead & \texttt{--lookahead-time} & $0.1$ \\
+gain & servoL gain & \texttt{--servo-gain} & $300$ \\
+$\lambda$ & IK damping (ROS) & \texttt{--damping} & $0.05$ \\
+$M$ & axis remap & \texttt{--rmat-reorder} & $[-2,-1,-3,4]$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}
