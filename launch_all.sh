@@ -23,6 +23,7 @@ LAUNCH_UI=true
 LAUNCH_QUEST=false
 LAUNCH_QUEST_SERVO=false
 LAUNCH_SPACEMOUSE=false
+LAUNCH_BRIDGE=false
 
 for arg in "$@"; do
     case $arg in
@@ -31,13 +32,16 @@ for arg in "$@"; do
         --quest|-q)        LAUNCH_QUEST=true ;;
         --quest-servo|-qs) LAUNCH_QUEST_SERVO=true ;;
         --spacemouse|-sm)  LAUNCH_SPACEMOUSE=true ;;
+        --bridge|-b)       LAUNCH_BRIDGE=true ;;
         --help|-h)
-            echo "Usage: $0 [--real] [--no-ui] [--quest] [--quest-servo] [--spacemouse]"
+            echo "Usage: $0 [--real] [--no-ui] [--quest] [--quest-servo] [--spacemouse] [--bridge]"
             echo "  --real, -r          Use real robot hardware + gripper adapter"
             echo "  --no-ui             Skip launching the Streamlit UI"
             echo "  --quest, -q         Quest sim teleop via cuRobo (PoseDelta, jerky)"
             echo "  --quest-servo, -qs  Quest sim teleop via Jacobian IK velocity (smooth)"
             echo "  --spacemouse, -sm   SpaceMouse teleop via Jacobian IK velocity (smooth)"
+            echo "  --bridge, -b        ROS-TCP-Endpoint bridge SERVER for the Virtual_UR5"
+            echo "                      Unity app (Unity runs separately and connects in)"
             exit 0
             ;;
     esac
@@ -114,6 +118,14 @@ if [ "$LAUNCH_SPACEMOUSE" = true ] && [ "$USE_FAKE" = "true" ]; then
         "echo '[SpaceMouse] Waiting 5s for UR5 driver...'; sleep 5; echo '[SpaceMouse] Starting SpaceMouse servo teleop...'; \"$SCRIPT_DIR/run_spacemouse_teleop.sh\" --swap; exec bash"
 elif [ "$LAUNCH_SPACEMOUSE" = true ] && [ "$USE_FAKE" = "false" ]; then
     echo "NOTE: --spacemouse targets the sim velocity controller (sim only)."
+fi
+
+# Window: ROS-TCP-Endpoint bridge server for the Virtual_UR5 Unity app (--bridge)
+# This is only the ROS-side TCP server; the Unity app runs separately (editor or
+# on-Quest) and connects in. Works with both fake and real hardware.
+if [ "$LAUNCH_BRIDGE" = true ]; then
+    tmux new-window -t "$SESSION" -n "ROS-TCP-Endpoint" \
+        "echo '[Bridge] Waiting 5s for UR5 driver...'; sleep 5; echo '[Bridge] Starting ROS-TCP-Endpoint...'; \"$SCRIPT_DIR/run_ros_tcp_endpoint.sh\"; exec bash"
 fi
 
 # Select the first window

@@ -1,13 +1,16 @@
 #!/bin/bash
 # ============================================================
-# Toggle between forward_velocity_controller (Quest teleop)
-# and scaled_joint_trajectory_controller (UI / MoveIt)
+# Switch the active UR5 arm controller.
+#   forward_velocity_controller        — Quest / SpaceMouse velocity teleop
+#   forward_position_controller        — Virtual_UR5 Unity Mode A (q[6] stream)
+#   scaled_joint_trajectory_controller — UI / MoveIt (default)
 # ============================================================
 # Run this from any terminal while launch_all.sh is running.
 # Usage:
-#   ./toggle_controller.sh          # auto-detects active and swaps
-#   ./toggle_controller.sh velocity # force → forward_velocity_controller
-#   ./toggle_controller.sh traj     # force → scaled_joint_trajectory_controller
+#   ./toggle_controller.sh           # auto-toggle velocity <-> traj (legacy)
+#   ./toggle_controller.sh velocity  # force → forward_velocity_controller
+#   ./toggle_controller.sh position  # force → forward_position_controller
+#   ./toggle_controller.sh traj      # force → scaled_joint_trajectory_controller
 
 set -eo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,51 +21,45 @@ source "$SCRIPT_DIR/install/setup.bash"
 set -u
 
 VEL="forward_velocity_controller"
+POS="forward_position_controller"
 TRAJ="scaled_joint_trajectory_controller"
 
-# ---- detect current active controller ----
-# Strip ANSI colour codes first, then match " active" (not "inactive")
+# ---- detect which arm controller is currently active ----
+# Strip ANSI colour codes first, then match " active" (not "inactive").
 ACTIVE=$(ros2 control list_controllers 2>/dev/null \
     | sed 's/\x1b\[[0-9;]*m//g' \
-    | grep -E "$VEL|$TRAJ" \
+    | grep -E "$VEL|$POS|$TRAJ" \
     | grep " active" \
     | awk '{print $1}' \
     | head -1 || true)
 
-# ---- parse optional argument ----
+# ---- resolve the wanted controller ----
 case "${1:-}" in
-    velocity|vel)   WANT="velocity" ;;
-    traj|trajectory) WANT="traj" ;;
+    velocity|vel)        WANT="$VEL" ;;
+    position|pos)        WANT="$POS" ;;
+    traj|trajectory)     WANT="$TRAJ" ;;
+    "")
+        # Legacy auto-toggle: velocity <-> traj.
+        if [[ "$ACTIVE" == "$VEL" ]]; then WANT="$TRAJ"; else WANT="$VEL"; fi
+        ;;
     *)
-        # auto-toggle
-        if [[ "$ACTIVE" == "$VEL" ]]; then
-            WANT="traj"
-        else
-            WANT="velocity"
-        fi
+        echo "Unknown controller '$1'. Use: velocity | position | traj"
+        exit 1
         ;;
 esac
 
-if [[ "$WANT" == "velocity" ]]; then
-    if [[ "$ACTIVE" == "$VEL" ]]; then
-        echo "forward_velocity_controller is already active."
-        exit 0
-    fi
-    echo "Switching → forward_velocity_controller  (Quest teleop)"
-    ros2 control switch_controllers \
-        --deactivate "$TRAJ" \
-        --activate   "$VEL" \
-        --controller-manager /controller_manager
-    echo "Done. Quest teleop is active."
-else
-    if [[ "$ACTIVE" == "$TRAJ" ]]; then
-        echo "scaled_joint_trajectory_controller is already active."
-        exit 0
-    fi
-    echo "Switching → scaled_joint_trajectory_controller  (UI / MoveIt)"
-    ros2 control switch_controllers \
-        --deactivate "$VEL" \
-        --activate   "$TRAJ" \
-        --controller-manager /controller_manager
-    echo "Done. UI is active."
+if [[ "$ACTIVE" == "$WANT" ]]; then
+    echo "$WANT is already active."
+    exit 0
 fi
+
+# Build args: deactivate whatever arm controller is active (if any), activate WANT.
+DEACT_ARGS=()
+[[ -n "$ACTIVE" ]] && DEACT_ARGS=(--deactivate "$ACTIVE")
+
+echo "Switching → $WANT"
+ros2 control switch_controllers \
+    "${DEACT_ARGS[@]}" \
+    --activate "$WANT" \
+    --controller-manager /controller_manager
+echo "Done. $WANT is active."

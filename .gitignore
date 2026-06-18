@@ -49,3 +49,4 @@ docs/*.aux
 docs/*.log
 docs/*.out
 docs/*.toc
+src/ROS-TCP-Endpoint/
