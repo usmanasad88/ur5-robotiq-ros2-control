@@ -113,11 +113,6 @@ joint pos_021453 -29.5835 -72.3961 74.4639 -123.2330 -65.4071 -177.3554
 # Isaac Sim cuboid pick poses (auto-generated)
 
 # Isaac Sim cuboid pick poses (auto-generated)
-pose cuboid_red 0.48047 -0.10574 0.06 0.0 1.0 0.0 0.0
-pose cuboid_green 0.45886 -0.14863 0.06 0.0 1.0 0.0 0.0
-pose cuboid_blue 0.45642 -0.18600 0.06 0.0 1.0 0.0 0.0
-pose cuboid_yellow 0.47716 0.02968 0.06 0.0 1.0 0.0 0.0
-pose cuboid_orange 0.60307 -0.25185 0.06 0.0 1.0 0.0 0.0
 
 
 # ============================================================
@@ -173,3 +168,14 @@ pose cuboid_orange 0.60307 -0.25185 0.06 0.0 1.0 0.0 0.0
 # to start the boil (blue LED turns on).
 # TODO joint Kettle_Switch_Above   0 0 0 0 0 0
 # TODO joint Kettle_Switch_On      0 0 0 0 0 0
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+
+# Isaac Sim cuboid pick poses (auto-generated)
+pose cuboid_red 0.51777 -0.21951 0.06 0.0 1.0 0.0 0.0
+pose cuboid_green 0.57893 -0.12026 0.06 0.0 1.0 0.0 0.0
+pose cuboid_blue 0.64377 -0.21864 0.06 0.0 1.0 0.0 0.0
+pose cuboid_yellow 0.42765 0.11567 0.06 0.0 1.0 0.0 0.0
+pose cuboid_orange 0.48170 -0.17014 0.06 0.0 1.0 0.0 0.0

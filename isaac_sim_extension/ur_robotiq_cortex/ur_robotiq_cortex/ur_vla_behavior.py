@@ -63,7 +63,7 @@ try:
     from curobo.types.robot import JointState
     from curobo.util_file import get_robot_configs_path, join_path, load_yaml
     from curobo.util.logger import setup_curobo_logger
-    from omni.isaac.core.utils.types import ArticulationAction
+    from isaacsim.core.utils.types import ArticulationAction
     CUROBO_AVAILABLE = True
 except Exception as e:
     CUROBO_AVAILABLE = False
@@ -183,8 +183,8 @@ def capture_viewport_frame(viewport_name: str = "Viewport") -> Optional[np.ndarr
     try:
         # Initialize camera on first call
         if _vla_camera is None:
-            from omni.isaac.sensor import Camera
-            import omni.isaac.core.utils.numpy.rotations as rot_utils
+            from isaacsim.sensors.camera import Camera
+            import isaacsim.core.utils.numpy.rotations as rot_utils
             
             # Create third-person camera positioned for workspace view
             # Position: x=2.72, y=4.77, z=2.52

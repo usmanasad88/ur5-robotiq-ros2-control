@@ -16,11 +16,14 @@ from isaacsim.cortex.framework.cortex_utils import load_behavior_module
 from pxr import UsdGeom
 from isaacsim.cortex.framework.cortex_world import CortexWorld
 from isaacsim.cortex.framework.dfb import DfDiagnosticsMonitor
-from isaacsim.cortex.framework.robot import (
+from isaacsim.cortex.framework.robot import MotionCommandedRobot
+# RobotiqGripper / CortexUr10Robotiq / add_ur10_robotiq_to_stage used to live in
+# isaacsim.cortex.framework.robot (hand-added there in the Isaac Sim 5.0 install).
+# Isaac Sim 6 ships a pristine robot.py, so we vendor them locally instead.
+from ur_robotiq_cortex.cortex_ur_robotiq import (
     CortexUr10Robotiq,
-    add_ur10_robotiq_to_stage,
-    MotionCommandedRobot,
     RobotiqGripper,
+    add_ur10_robotiq_to_stage,
 )
 from isaacsim.examples.interactive.cortex.cortex_base import CortexBase
 from ur_robotiq_cortex.ur_ros2_follower_behavior import ROS2FollowerContext

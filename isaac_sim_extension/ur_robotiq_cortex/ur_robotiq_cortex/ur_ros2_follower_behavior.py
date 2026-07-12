@@ -31,7 +31,7 @@ except ImportError:
 
 import omni.physx
 import carb
-from omni.isaac.core.utils.rotations import euler_angles_to_quat
+from isaacsim.core.utils.rotations import euler_angles_to_quat
 
 from isaacsim.cortex.framework.df import (
     DfDecider,
@@ -57,7 +57,7 @@ except ImportError:
 
 # ArticulationAction for direct control
 try:
-    from omni.isaac.core.utils.types import ArticulationAction
+    from isaacsim.core.utils.types import ArticulationAction
 except Exception as e:
     print(f"[ROS2 Follower] Could not import ArticulationAction: {e}")
 
